@@ -1,16 +1,23 @@
 use anchor_lang::prelude::*;
 
-declare_id!("A5vQdPeJH2Yn72RmXHyrFjErUTqPwX83e6of4LBchEbG");
+mod program_id;
+use program_id::PROGRAM_ID;
+mod common;
+use common::*;
+mod contexts;
+use contexts::*;
+mod states;
+use states::*;
+
+declare_id!(PROGRAM_ID);
 
 #[program]
 pub mod contract {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        msg!("Greetings from: {:?}", ctx.program_id);
+        ctx.accounts.initialize(&ctx.bumps)?;
+
         Ok(())
     }
 }
-
-#[derive(Accounts)]
-pub struct Initialize {}
