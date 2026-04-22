@@ -1,5 +1,4 @@
-use anchor_lang::prelude::Pubkey;
-use anchor_lang::pubkey;
+use anchor_lang::{prelude::Pubkey, pubkey};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "dev")] {
