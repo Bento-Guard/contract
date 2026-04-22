@@ -14,4 +14,8 @@ declare_id!(PROGRAM_ID);
 #[program]
 pub mod contract {
   use super::*;
+
+  pub fn initialize(ctx: Context<InitializeConfig>, params: InitializeConfigParams) -> Result<()> {
+    admin::initialize::process(ctx, params)
+  }
 }
