@@ -13,11 +13,5 @@ declare_id!(PROGRAM_ID);
 
 #[program]
 pub mod contract {
-    use super::*;
-
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        ctx.accounts.initialize(&ctx.bumps)?;
-
-        Ok(())
-    }
+  use super::*;
 }

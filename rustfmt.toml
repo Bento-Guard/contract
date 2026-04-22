@@ -1,0 +1,6 @@
+edition = "2021"
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+hard_tabs = false
+tab_spaces = 2
+imports_layout = "Mixed"
