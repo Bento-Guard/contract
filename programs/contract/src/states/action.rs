@@ -27,11 +27,3 @@ pub struct Action {
   // Encrypted payload (chunked writes)
   pub encrypted_payload: [u8; MAX_PAYLOAD], // 8192
 }
-
-#[account]
-pub struct AllowedTarget {
-  pub agent: Pubkey,
-  pub target: Pubkey,
-  pub allowed: bool,
-  pub bump: u8,
-}

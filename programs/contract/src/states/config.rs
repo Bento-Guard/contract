@@ -20,7 +20,6 @@ pub struct Config {
   pub ema_scale: u16,
 
   pub total_agents: u64,
-  pub total_actions: u64,
 
   pub bump: u8,
   pub _padding: [u64; 8],
@@ -52,7 +51,10 @@ impl<'info> Config {
     self.ema_alpha = ema_alpha;
     self.ema_scale = ema_scale;
     self.total_agents = 0;
-    self.total_actions = 0;
     self.bump = bump;
+  }
+
+  pub fn increment_agents(&mut self) {
+    self.total_agents += 1;
   }
 }

@@ -24,6 +24,8 @@ impl From<Active> for bool {
   }
 }
 
+const MAX_ALLOWED_TARGETS: usize = 10;
+
 #[account]
 #[derive(InitSpace, Debug)]
 pub struct Agent {
@@ -35,6 +37,8 @@ pub struct Agent {
 
   pub threat_score: u32,
   pub strikes: u8,
+
+  pub allowed_targets: [AllowedTarget; MAX_ALLOWED_TARGETS],
 
   /**
    * 0: Inactive
@@ -52,6 +56,14 @@ pub struct Agent {
 
   pub bump: u8,
   pub _padding: [u64; 8],
+}
+
+#[derive(Debug, Clone, Copy, InitSpace, AnchorDeserialize, AnchorSerialize)]
+pub struct AllowedTarget {
+  pub agent: Pubkey,
+  pub target: Pubkey,
+  pub allowed: bool,
+  pub bump: u8,
 }
 
 impl<'info> Agent {
