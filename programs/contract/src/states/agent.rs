@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::common::constant;
+use crate::common::{constant, error::BentoError};
 
 #[derive(PartialEq, Copy, Clone)]
 enum Active {
@@ -60,10 +60,8 @@ pub struct Agent {
 
 #[derive(Debug, Clone, Copy, InitSpace, AnchorDeserialize, AnchorSerialize)]
 pub struct AllowedTarget {
-  pub agent: Pubkey,
   pub target: Pubkey,
   pub allowed: bool,
-  pub bump: u8,
 }
 
 impl<'info> Agent {
@@ -77,5 +75,32 @@ impl<'info> Agent {
     self.spend_limit = spend_limit;
     self.active = Active::Active.into();
     self.bump = bump;
+  }
+
+  pub fn find_mut_program_allowed_target(
+    &mut self,
+    program_target: Pubkey,
+  ) -> Option<&mut AllowedTarget> {
+    self
+      .allowed_targets
+      .iter_mut()
+      .find(|allowed_target| allowed_target.target == program_target)
+  }
+
+  pub fn add_program_allowed_target(&mut self, program_target: Pubkey) -> Result<()> {
+    if let Some(index) = self
+      .allowed_targets
+      .iter()
+      .position(|allowed_target| allowed_target.target == Pubkey::default())
+    {
+      self.allowed_targets[index] = AllowedTarget {
+        target: program_target,
+        allowed: true,
+      };
+
+      Ok(())
+    } else {
+      err!(BentoError::AllowedTargetProgramReachedLimit)
+    }
   }
 }

@@ -15,3 +15,9 @@ pub struct RegisterAgent {
   pub agent_wallet: Pubkey,
   pub owner: Pubkey,
 }
+
+#[event]
+pub struct AddAllowProgramTarget {
+  pub agent: Pubkey,
+  pub program: Pubkey,
+}

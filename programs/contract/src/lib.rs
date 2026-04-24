@@ -26,4 +26,11 @@ pub mod contract {
   pub fn register_agent(ctx: Context<RegisterAgent>, params: RegisterAgentParams) -> Result<()> {
     register_agent::process(ctx, params)
   }
+
+  pub fn update_agent_program_target(
+    ctx: Context<UpdateAgentProgramTarget>,
+    target: AllowedTarget,
+  ) -> Result<()> {
+    update_agent_program_target::process(ctx, target)
+  }
 }
