@@ -25,11 +25,12 @@ pub struct Config {
   pub _padding: [u64; 8],
 }
 
-impl<'info> Config {
+impl Config {
   pub fn space() -> usize {
     constant::DISCRIMINATOR + Config::INIT_SPACE
   }
 
+  #[allow(clippy::too_many_arguments)]
   pub fn init(
     &mut self,
     operator: Pubkey,

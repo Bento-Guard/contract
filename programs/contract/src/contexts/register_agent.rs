@@ -34,7 +34,7 @@ pub fn process(ctx: Context<RegisterAgent>, params: RegisterAgentParams) -> Resu
   )?;
 
   emit!(event::RegisterAgent {
-    agent_wallet: agent_wallet,
+    agent_wallet,
     owner: ctx.accounts.owner.key(),
   });
 
