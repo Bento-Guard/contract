@@ -12,6 +12,11 @@ pub struct RegisterAgentParams {
 }
 
 pub fn process(ctx: Context<RegisterAgent>, params: RegisterAgentParams) -> Result<()> {
+  {
+    let config = &ctx.accounts.config;
+    config.is_in_maintenance()?;
+  }
+
   let agent_wallet = ctx.accounts.agent_wallet.key();
   let agent = &mut ctx.accounts.agent;
   let config = &mut ctx.accounts.config;

@@ -3,11 +3,14 @@ use ephemeral_rollups_sdk::{anchor::delegate, cpi::DelegateConfig};
 
 use crate::{
   common::{constant, error::BentoError, event},
-  states::{Agent, AgentStatus},
+  states::{Agent, AgentStatus, Config},
 };
 
 pub fn process(ctx: Context<ActiveAgent>) -> Result<()> {
   {
+    let config = &ctx.accounts.config;
+    config.is_in_maintenance()?;
+
     let agent = &mut ctx.accounts.agent;
 
     if agent.active != AgentStatus::Inactive.into() {
@@ -48,4 +51,10 @@ pub struct ActiveAgent<'info> {
     has_one = owner,
   )]
   pub agent: Account<'info, Agent>,
+
+  #[account(
+    seeds = [constant::PREFIX_SEED, b"config"],
+    bump = config.bump
+  )]
+  pub config: Account<'info, Config>,
 }

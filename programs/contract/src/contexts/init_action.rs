@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{
   common::{constant, error::BentoError, event},
-  states::{Action, Agent, MAX_PAYLOAD},
+  states::{Action, Agent, Config, MAX_PAYLOAD},
 };
 
 #[derive(AnchorDeserialize, AnchorSerialize)]
@@ -14,6 +14,11 @@ pub struct InitActionParams {
 }
 
 pub fn process(ctx: Context<InitAction>, params: InitActionParams) -> Result<()> {
+  {
+    let config = &ctx.accounts.config;
+    config.is_in_maintenance()?;
+  }
+
   require!(
     params.total_data_len <= MAX_PAYLOAD as u32,
     BentoError::PayloadTooLarge
@@ -67,6 +72,12 @@ pub struct InitAction<'info> {
     bump,
   )]
   pub action: AccountLoader<'info, Action>,
+
+  #[account(
+    seeds = [constant::PREFIX_SEED, b"config"],
+    bump = config.bump
+  )]
+  pub config: Account<'info, Config>,
 
   pub system_program: Program<'info, System>,
 }

@@ -3,10 +3,15 @@ use ephemeral_rollups_sdk::{anchor::delegate, cpi::DelegateConfig};
 
 use crate::{
   common::{constant, error::BentoError},
-  states::{Action, Agent},
+  states::{Action, Agent, Config},
 };
 
 pub fn process(ctx: Context<DelegateAction>) -> Result<()> {
+  {
+    let config = &ctx.accounts.config;
+    config.is_in_maintenance()?;
+  }
+
   let action = &ctx.accounts.action.load()?;
 
   if action.agent != ctx.accounts.agent.key() {
@@ -41,4 +46,10 @@ pub struct DelegateAction<'info> {
 
   #[account(mut, del)]
   pub action: AccountLoader<'info, Action>,
+
+  #[account(
+    seeds = [constant::PREFIX_SEED, b"config"],
+    bump = config.bump
+  )]
+  pub config: Account<'info, Config>,
 }

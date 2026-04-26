@@ -23,6 +23,10 @@ pub mod contract {
     admin::update_confg::process(ctx, params)
   }
 
+  pub fn update_maintenance(ctx: Context<UpdateMaintenance>, maintenance: bool) -> Result<()> {
+    admin::update_maintenance::process(ctx, maintenance)
+  }
+
   pub fn register_agent(ctx: Context<RegisterAgent>, params: RegisterAgentParams) -> Result<()> {
     register_agent::process(ctx, params)
   }

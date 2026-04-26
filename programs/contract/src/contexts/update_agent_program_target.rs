@@ -3,10 +3,15 @@ use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_accounts};
 
 use crate::{
   common::constant,
-  states::{Agent, AllowedTarget},
+  states::{Agent, AllowedTarget, Config},
 };
 
 pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTarget) -> Result<()> {
+  {
+    let config = &ctx.accounts.config;
+    config.is_in_maintenance()?;
+  }
+
   let agent = &mut ctx.accounts.agent;
 
   let existing = agent.find_mut_program_allowed_target(target_update.target);
@@ -41,4 +46,10 @@ pub struct UpdateAgentProgramTarget<'info> {
     bump = agent.bump
   )]
   pub agent: Account<'info, Agent>,
+
+  #[account(
+    seeds = [constant::PREFIX_SEED, b"config"],
+    bump = config.bump
+  )]
+  pub config: Account<'info, Config>,
 }

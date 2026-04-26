@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::constant;
+use crate::{common::error::BentoError, constant};
 
 #[account]
 #[derive(InitSpace, Debug)]
@@ -22,6 +22,7 @@ pub struct Config {
   pub total_agents: u64,
 
   pub bump: u8,
+  pub maintenance: bool,
   pub _padding: [u64; 8],
 }
 
@@ -57,5 +58,13 @@ impl Config {
 
   pub fn increment_agents(&mut self) {
     self.total_agents += 1;
+  }
+
+  pub fn is_in_maintenance(&self) -> Result<()> {
+    if self.maintenance {
+      return err!(BentoError::BentoIsInMaintenance);
+    }
+
+    Ok(())
   }
 }

@@ -2,6 +2,9 @@ use anchor_lang::error_code;
 
 #[error_code]
 pub enum BentoError {
+  #[msg("Bento is in maintenance")]
+  BentoIsInMaintenance,
+
   #[msg("Invalid Operator")]
   InvalidOperator,
 
