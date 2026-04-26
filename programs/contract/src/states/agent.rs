@@ -3,24 +3,24 @@ use anchor_lang::prelude::*;
 use crate::common::{constant, error::BentoError};
 
 #[derive(PartialEq, Copy, Clone)]
-enum Active {
+pub enum AgentStatus {
   Inactive = 0,
   Active = 1,
 }
 
-impl From<bool> for Active {
+impl From<bool> for AgentStatus {
   fn from(value: bool) -> Self {
     if value {
-      Active::Active
+      AgentStatus::Active
     } else {
-      Active::Inactive
+      AgentStatus::Inactive
     }
   }
 }
 
-impl From<Active> for bool {
-  fn from(value: Active) -> Self {
-    value == Active::Active
+impl From<AgentStatus> for bool {
+  fn from(value: AgentStatus) -> Self {
+    value == AgentStatus::Active
   }
 }
 
@@ -68,7 +68,7 @@ impl Agent {
     self.agent_wallet = agent_wallet;
     self.owner = owner;
     self.spend_limit = spend_limit;
-    self.active = Active::Active.into();
+    self.active = AgentStatus::Active.into();
     self.bump = bump;
   }
 
@@ -103,5 +103,15 @@ impl Agent {
     if self.action_counter < current_action_id {
       self.action_counter = current_action_id;
     }
+  }
+
+  #[inline(always)]
+  pub fn deactivate(&mut self) {
+    self.active = AgentStatus::Inactive.into();
+  }
+
+  #[inline(always)]
+  pub fn activate(&mut self) {
+    self.active = AgentStatus::Active.into();
   }
 }

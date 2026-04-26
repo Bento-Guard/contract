@@ -27,6 +27,14 @@ pub mod contract {
     register_agent::process(ctx, params)
   }
 
+  pub fn deactivate_agent(ctx: Context<DeactivateAgent>) -> Result<()> {
+    deactivate_agent::process(ctx)
+  }
+
+  pub fn active_agent(ctx: Context<ActiveAgent>) -> Result<()> {
+    active_agent::process(ctx)
+  }
+
   pub fn update_agent_program_target(
     ctx: Context<UpdateAgentProgramTarget>,
     target: AllowedTarget,

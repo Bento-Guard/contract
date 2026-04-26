@@ -17,6 +17,16 @@ pub struct RegisterAgent {
 }
 
 #[event]
+pub struct DeactivateAgent {
+  pub agent: Pubkey,
+}
+
+#[event]
+pub struct ActiveAgent {
+  pub agent: Pubkey,
+}
+
+#[event]
 pub struct InitAction {
   pub action_id: u64,
   pub target_program: Pubkey,

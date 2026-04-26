@@ -25,4 +25,7 @@ pub enum BentoError {
 
   #[msg("Action does not belong to agent")]
   ActionDoesNotBelongToAgent,
+
+  #[msg("Agent already active")]
+  AgentAlreadyActive,
 }
