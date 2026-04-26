@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::anchor::commit;
+use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_accounts};
 
 use crate::{
   common::constant,
@@ -15,6 +15,13 @@ pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTar
   } else {
     agent.add_program_allowed_target(target_update.target)?;
   }
+
+  commit_accounts(
+    &ctx.accounts.owner,
+    vec![&ctx.accounts.agent.to_account_info()],
+    &ctx.accounts.magic_context,
+    &ctx.accounts.magic_program,
+  )?;
 
   Ok(())
 }

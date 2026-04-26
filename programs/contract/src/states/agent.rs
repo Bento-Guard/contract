@@ -39,11 +39,6 @@ pub struct Agent {
   pub strikes: u8,
 
   pub allowed_targets: [AllowedTarget; MAX_ALLOWED_TARGETS],
-
-  /**
-   * 0: Inactive
-   * 1: Active
-   */
   pub active: bool,
 
   // Metadata
@@ -101,6 +96,12 @@ impl<'info> Agent {
       Ok(())
     } else {
       err!(BentoError::AllowedTargetProgramReachedLimit)
+    }
+  }
+
+  pub fn increase_action_counter(&mut self, current_action_id: u64) {
+    if self.action_counter < current_action_id {
+      self.action_counter = current_action_id;
     }
   }
 }

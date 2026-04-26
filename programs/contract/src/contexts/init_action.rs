@@ -26,6 +26,7 @@ pub fn process(ctx: Context<InitAction>, params: InitActionParams) -> Result<()>
     params.action_id,
     params.target_program,
     params.value,
+    params.total_data_len,
     ctx.bumps.action,
   );
 

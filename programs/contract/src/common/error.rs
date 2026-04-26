@@ -16,4 +16,13 @@ pub enum BentoError {
 
   #[msg("Data length too large")]
   PayloadTooLarge,
+
+  #[msg("Action is not in initial state")]
+  ActionIsNotInInitialState,
+
+  #[msg("Invalid offset payload data")]
+  InvalidOffsetPayloadData,
+
+  #[msg("Action does not belong to agent")]
+  ActionDoesNotBelongToAgent,
 }

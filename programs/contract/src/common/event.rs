@@ -23,3 +23,9 @@ pub struct InitAction {
   pub value: u64,
   pub agent: Pubkey,
 }
+
+#[event]
+pub struct ActionSubmitted {
+  pub action_id: u64,
+  pub agent: Pubkey,
+}

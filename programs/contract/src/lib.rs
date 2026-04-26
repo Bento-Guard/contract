@@ -41,4 +41,15 @@ pub mod contract {
   pub fn delegate_action(ctx: Context<DelegateAction>) -> Result<()> {
     delegate_action::process(ctx)
   }
+
+  pub fn append_payload(ctx: Context<AppendPayload>, params: AppendPayloadParams) -> Result<()> {
+    append_payload::process(ctx, params)
+  }
+
+  pub fn finalize_action_building(
+    ctx: Context<FinalizeActionBuilding>,
+    commitment_hash: [u8; 32],
+  ) -> Result<()> {
+    finalize_action_building::process(ctx, commitment_hash)
+  }
 }

@@ -1,25 +1,27 @@
 use anchor_lang::prelude::*;
 
-use crate::common::constant;
+use crate::common::{constant, error::BentoError};
 
 pub const MAX_PAYLOAD: usize = 8192;
 
 pub enum ActionStatus {
-  PENDING = 0,
-  APPROVED = 1,
-  ESCALATED = 2,
-  BLOCKED = 3,
-  REJECTED = 4,
+  INITIALIZATION = 0,
+  PENDING = 1,
+  APPROVED = 2,
+  ESCALATED = 3,
+  BLOCKED = 4,
+  REJECTED = 5,
 }
 
 impl From<u8> for ActionStatus {
   fn from(value: u8) -> Self {
     match value {
-      0 => ActionStatus::PENDING,
-      1 => ActionStatus::APPROVED,
-      2 => ActionStatus::ESCALATED,
-      3 => ActionStatus::BLOCKED,
-      4 => ActionStatus::REJECTED,
+      0 => ActionStatus::INITIALIZATION,
+      1 => ActionStatus::PENDING,
+      2 => ActionStatus::APPROVED,
+      3 => ActionStatus::ESCALATED,
+      4 => ActionStatus::BLOCKED,
+      5 => ActionStatus::REJECTED,
       _ => unreachable!(),
     }
   }
@@ -67,13 +69,39 @@ impl Action {
     action_id: u64,
     target_program: Pubkey,
     value: u64,
+    data_len: u32,
     bump: u8,
   ) {
     self.agent = agent;
     self.action_id = action_id;
     self.target_program = target_program;
     self.value = value;
-    self.status = ActionStatus::PENDING.into();
+    self.status = ActionStatus::INITIALIZATION.into();
+    self.data_len = data_len;
     self.bump = bump;
+  }
+
+  pub fn must_be_in_status(&self, expected_status: ActionStatus) -> Result<()> {
+    match expected_status {
+      ActionStatus::INITIALIZATION => {
+        if self.status != ActionStatus::INITIALIZATION.into() {
+          return err!(BentoError::ActionIsNotInInitialState);
+        }
+      }
+      _ => {}
+    }
+
+    Ok(())
+  }
+
+  #[inline(always)]
+  pub fn move_to_status(&mut self, new_status: ActionStatus) {
+    self.status = new_status.into();
+  }
+
+  #[inline(always)]
+  pub fn must_belong_to_agent(&self, agent: Pubkey) -> Result<()> {
+    require!(self.agent == agent, BentoError::ActionDoesNotBelongToAgent);
+    Ok(())
   }
 }
