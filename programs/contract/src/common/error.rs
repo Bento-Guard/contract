@@ -10,4 +10,7 @@ pub enum BentoError {
 
   #[msg("Allowed target program reached limit")]
   AllowedTargetProgramReachedLimit,
+
+  #[msg("Delegation wrong action not belong to agent")]
+  DelegationWrongActionNotBelongToAgent,
 }

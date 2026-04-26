@@ -15,3 +15,11 @@ pub struct RegisterAgent {
   pub agent_wallet: Pubkey,
   pub owner: Pubkey,
 }
+
+#[event]
+pub struct InitAction {
+  pub action_id: u64,
+  pub target_program: Pubkey,
+  pub value: u64,
+  pub agent: Pubkey,
+}

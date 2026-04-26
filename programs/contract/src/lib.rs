@@ -33,4 +33,12 @@ pub mod contract {
   ) -> Result<()> {
     update_agent_program_target::process(ctx, target)
   }
+
+  pub fn init_action(ctx: Context<InitAction>, params: InitActionParams) -> Result<()> {
+    init_action::process(ctx, params)
+  }
+
+  pub fn delegate_action(ctx: Context<DelegateAction>) -> Result<()> {
+    delegate_action::process(ctx)
+  }
 }
