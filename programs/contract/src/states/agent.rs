@@ -59,7 +59,7 @@ pub struct AllowedTarget {
   pub allowed: bool,
 }
 
-impl<'info> Agent {
+impl Agent {
   pub fn space() -> usize {
     constant::DISCRIMINATOR + Agent::INIT_SPACE
   }
