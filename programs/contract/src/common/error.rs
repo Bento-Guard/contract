@@ -8,6 +8,9 @@ pub enum BentoError {
   #[msg("Invalid Operator")]
   InvalidOperator,
 
+  #[msg("Invalid Relayer")]
+  InvalidRelayer,
+
   #[msg("Allowed target program already exists")]
   AllowedTargetProgramAlreadyExists,
 
@@ -22,6 +25,9 @@ pub enum BentoError {
 
   #[msg("Action is not in initial state")]
   ActionIsNotInInitialState,
+
+  #[msg("Action is not in pending state")]
+  ActionIsNotInPendingState,
 
   #[msg("Invalid offset payload data")]
   InvalidOffsetPayloadData,

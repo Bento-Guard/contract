@@ -4,6 +4,7 @@ use crate::common::{constant, error::BentoError};
 
 pub const MAX_PAYLOAD: usize = 8192;
 
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ActionStatus {
   INITIALIZATION = 0,
   PENDING = 1,
@@ -50,6 +51,7 @@ pub struct Action {
   pub status: u8,
   pub decision: u8,
   pub raw_score: u32,
+  pub reasoning_hash: [u8; 32],
 
   pub bump: u8,
   pub _padding: [u8; 7],
@@ -86,6 +88,11 @@ impl Action {
       ActionStatus::INITIALIZATION => {
         if self.status != ActionStatus::INITIALIZATION.into() {
           return err!(BentoError::ActionIsNotInInitialState);
+        }
+      }
+      ActionStatus::PENDING => {
+        if self.status != ActionStatus::PENDING.into() {
+          return err!(BentoError::ActionIsNotInPendingState);
         }
       }
       _ => {}

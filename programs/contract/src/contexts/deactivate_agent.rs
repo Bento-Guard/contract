@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_and_undelegate_accounts};
 
-use crate::{common::{constant, event}, states::{Agent, Config}};
+use crate::{
+  common::{constant, event},
+  states::{Agent, Config},
+};
 
 pub fn process(ctx: Context<DeactivateAgent>) -> Result<()> {
   {

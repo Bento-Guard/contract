@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::{common::error::BentoError, constant};
+use crate::{common::error::BentoError, constant, states::ActionStatus};
 
 #[account]
 #[derive(InitSpace, Debug)]
@@ -66,5 +66,15 @@ impl Config {
     }
 
     Ok(())
+  }
+
+  pub fn decision_for(&self, raw_score: u32) -> ActionStatus {
+    if raw_score >= self.block_threshold {
+      ActionStatus::BLOCKED
+    } else if raw_score >= self.escalate_threshold {
+      ActionStatus::ESCALATED
+    } else {
+      ActionStatus::APPROVED
+    }
   }
 }

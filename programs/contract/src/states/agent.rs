@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
 
-use crate::common::{constant, error::BentoError};
+use crate::{
+  common::{constant, error::BentoError},
+  states::ActionStatus,
+};
 
 #[derive(PartialEq, Copy, Clone)]
 pub enum AgentStatus {
@@ -113,5 +116,36 @@ impl Agent {
   #[inline(always)]
   pub fn activate(&mut self) {
     self.active = AgentStatus::Active.into();
+  }
+
+  pub fn apply_threat_score(&mut self, raw_score: u32, ema_alpha: u16, ema_scale: u16) {
+    let alpha = ema_alpha as u64;
+    let scale = ema_scale as u64;
+    let prev = self.threat_score as u64;
+    let raw = raw_score as u64;
+    let next = (alpha * raw + (scale - alpha) * prev) / scale;
+    self.threat_score = next as u32;
+  }
+
+  #[inline(always)]
+  pub fn add_strike(&mut self) {
+    self.strikes = self.strikes.saturating_add(1);
+  }
+
+  pub fn auto_deactivate_if_max_strikes(&mut self, max_strikes: u8) -> bool {
+    if self.strikes >= max_strikes && self.active {
+      self.deactivate();
+      return true;
+    }
+    false
+  }
+
+  pub fn record_decision(&mut self, decision: ActionStatus) {
+    match decision {
+      ActionStatus::APPROVED => self.total_approved = self.total_approved.saturating_add(1),
+      ActionStatus::ESCALATED => self.total_escalated = self.total_escalated.saturating_add(1),
+      ActionStatus::BLOCKED => self.total_blocked = self.total_blocked.saturating_add(1),
+      _ => {}
+    }
   }
 }

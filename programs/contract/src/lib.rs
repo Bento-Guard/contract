@@ -64,4 +64,8 @@ pub mod contract {
   ) -> Result<()> {
     finalize_action_building::process(ctx, commitment_hash)
   }
+
+  pub fn verdict_action(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Result<()> {
+    admin::verdict_action::process(ctx, params)
+  }
 }
