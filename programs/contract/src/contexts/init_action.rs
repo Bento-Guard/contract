@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-  common::{constant, event},
-  states::{Action, Agent},
+  common::{constant, error::BentoError, event},
+  states::{Action, Agent, MAX_PAYLOAD},
 };
 
 #[derive(AnchorDeserialize, AnchorSerialize)]
@@ -10,9 +10,15 @@ pub struct InitActionParams {
   pub target_program: Pubkey,
   pub value: u64,
   pub action_id: u64,
+  pub total_data_len: u32,
 }
 
 pub fn process(ctx: Context<InitAction>, params: InitActionParams) -> Result<()> {
+  require!(
+    params.total_data_len <= MAX_PAYLOAD as u32,
+    BentoError::PayloadTooLarge
+  );
+
   let action = &mut ctx.accounts.action.load_init()?;
 
   action.init(

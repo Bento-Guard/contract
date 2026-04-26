@@ -13,4 +13,7 @@ pub enum BentoError {
 
   #[msg("Delegation wrong action not belong to agent")]
   DelegationWrongActionNotBelongToAgent,
+
+  #[msg("Data length too large")]
+  PayloadTooLarge,
 }
