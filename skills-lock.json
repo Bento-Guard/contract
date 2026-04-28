@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "skills": {
+    "as-ask": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/as-ask/SKILL.md",
+      "computedHash": "d56e653495437ac6e7c06b2382bc4fbca2161444e8a7d7d311d638a276937a73"
+    },
+    "as-fix": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/as-fix/SKILL.md",
+      "computedHash": "5b6c36a99348a4c7062648055cff1409a54ffffbef08704935fd63fbf4a20008"
+    },
+    "as-review": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/as-review/SKILL.md",
+      "computedHash": "e3574c3992d38fd966beddcc49c7b8962088192e91ba71cd93271e3894a5d9fd"
+    },
+    "brainstorm": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/brainstorm/SKILL.md",
+      "computedHash": "cdccbfa05815b656fd046ee26cb30c49d82aa69b1083936b7889399d9a330392"
+    },
+    "docs": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/docs/SKILL.md",
+      "computedHash": "89876917e7c98557ebc1413ecaf685fd0e7c9cd3921f37f5e50dc17175fe45d6"
+    },
+    "execute-plan": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/execute-plan/SKILL.md",
+      "computedHash": "7056c4f5390ee1a518fa5ef9c763a9fca2dc71744a3da806e73830d78a5149b3"
+    },
+    "git-commit": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/git-commit/SKILL.md",
+      "computedHash": "3c29bdb928d342242dff10ac5ec8fe3896e7c32387c838961e9de29d1f6d12f4"
+    },
+    "quick-implement": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/quick-implement/SKILL.md",
+      "computedHash": "04451b2115cf32c382268577072f7953dbd6bec993b11656d83255eb8b2b3081"
+    },
+    "write-plan": {
+      "source": "buiducnhat/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/write-plan/SKILL.md",
+      "computedHash": "54e7ead668c3a819960e50d59abc8da184720ac90bdb47fba13e72f973b9ffdd"
+    }
+  }
+}
