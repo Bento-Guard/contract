@@ -13,7 +13,7 @@ pub fn process(ctx: Context<ActiveAgent>) -> Result<()> {
 
     let agent = &mut ctx.accounts.agent;
 
-    if agent.active != AgentStatus::Inactive.into() {
+    if agent.active != bool::from(AgentStatus::Inactive) {
       return err!(BentoError::AgentAlreadyActive);
     }
 

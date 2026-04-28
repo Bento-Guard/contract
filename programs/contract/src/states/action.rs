@@ -86,12 +86,12 @@ impl Action {
   pub fn must_be_in_status(&self, expected_status: ActionStatus) -> Result<()> {
     match expected_status {
       ActionStatus::Initialization => {
-        if self.status != ActionStatus::Initialization.into() {
+        if self.status != ActionStatus::Initialization as u8 {
           return err!(BentoError::ActionIsNotInInitialState);
         }
       }
       ActionStatus::Pending => {
-        if self.status != ActionStatus::Pending.into() {
+        if self.status != ActionStatus::Pending as u8 {
           return err!(BentoError::ActionIsNotInPendingState);
         }
       }
