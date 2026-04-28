@@ -6,23 +6,23 @@ pub const MAX_PAYLOAD: usize = 8192;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ActionStatus {
-  INITIALIZATION = 0,
-  PENDING = 1,
-  APPROVED = 2,
-  ESCALATED = 3,
-  BLOCKED = 4,
-  REJECTED = 5,
+  Initialization = 0,
+  Pending = 1,
+  Approved = 2,
+  Escalated = 3,
+  Blocked = 4,
+  Rejected = 5,
 }
 
 impl From<u8> for ActionStatus {
   fn from(value: u8) -> Self {
     match value {
-      0 => ActionStatus::INITIALIZATION,
-      1 => ActionStatus::PENDING,
-      2 => ActionStatus::APPROVED,
-      3 => ActionStatus::ESCALATED,
-      4 => ActionStatus::BLOCKED,
-      5 => ActionStatus::REJECTED,
+      0 => ActionStatus::Initialization,
+      1 => ActionStatus::Pending,
+      2 => ActionStatus::Approved,
+      3 => ActionStatus::Escalated,
+      4 => ActionStatus::Blocked,
+      5 => ActionStatus::Rejected,
       _ => unreachable!(),
     }
   }
@@ -78,20 +78,20 @@ impl Action {
     self.action_id = action_id;
     self.target_program = target_program;
     self.value = value;
-    self.status = ActionStatus::INITIALIZATION.into();
+    self.status = ActionStatus::Initialization.into();
     self.data_len = data_len;
     self.bump = bump;
   }
 
   pub fn must_be_in_status(&self, expected_status: ActionStatus) -> Result<()> {
     match expected_status {
-      ActionStatus::INITIALIZATION => {
-        if self.status != ActionStatus::INITIALIZATION.into() {
+      ActionStatus::Initialization => {
+        if self.status != ActionStatus::Initialization.into() {
           return err!(BentoError::ActionIsNotInInitialState);
         }
       }
-      ActionStatus::PENDING => {
-        if self.status != ActionStatus::PENDING.into() {
+      ActionStatus::Pending => {
+        if self.status != ActionStatus::Pending.into() {
           return err!(BentoError::ActionIsNotInPendingState);
         }
       }

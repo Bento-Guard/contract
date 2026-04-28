@@ -142,9 +142,9 @@ impl Agent {
 
   pub fn record_decision(&mut self, decision: ActionStatus) {
     match decision {
-      ActionStatus::APPROVED => self.total_approved = self.total_approved.saturating_add(1),
-      ActionStatus::ESCALATED => self.total_escalated = self.total_escalated.saturating_add(1),
-      ActionStatus::BLOCKED => self.total_blocked = self.total_blocked.saturating_add(1),
+      ActionStatus::Approved => self.total_approved = self.total_approved.saturating_add(1),
+      ActionStatus::Escalated => self.total_escalated = self.total_escalated.saturating_add(1),
+      ActionStatus::Blocked => self.total_blocked = self.total_blocked.saturating_add(1),
       _ => {}
     }
   }

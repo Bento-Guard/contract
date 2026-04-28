@@ -28,7 +28,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
   let value;
   {
     let action = &mut ctx.accounts.action.load_mut()?;
-    action.must_be_in_status(ActionStatus::PENDING)?;
+    action.must_be_in_status(ActionStatus::Pending)?;
     action.must_belong_to_agent(agent_key)?;
 
     action.raw_score = raw_score;
@@ -65,7 +65,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
 
   let action_pda = ctx.accounts.action.key();
   match decision {
-    ActionStatus::APPROVED => emit!(event::ActionApproved {
+    ActionStatus::Approved => emit!(event::ActionApproved {
       action: action_pda,
       agent: agent_key,
       target_program,
@@ -73,7 +73,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
       raw_score,
       threat_score,
     }),
-    ActionStatus::ESCALATED => emit!(event::ActionEscalated {
+    ActionStatus::Escalated => emit!(event::ActionEscalated {
       action: action_pda,
       agent: agent_key,
       target_program,
@@ -82,7 +82,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
       threat_score,
       reasoning_hash,
     }),
-    ActionStatus::BLOCKED => emit!(event::ActionBlocked {
+    ActionStatus::Blocked => emit!(event::ActionBlocked {
       action: action_pda,
       agent: agent_key,
       target_program,

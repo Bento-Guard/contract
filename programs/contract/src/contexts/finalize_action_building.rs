@@ -9,9 +9,9 @@ use crate::{
 pub fn process(ctx: Context<FinalizeActionBuilding>, commitment_hash: [u8; 32]) -> Result<()> {
   let action = &mut ctx.accounts.action.load_mut()?;
   action.must_belong_to_agent(ctx.accounts.agent.key())?;
-  action.must_be_in_status(ActionStatus::INITIALIZATION)?;
+  action.must_be_in_status(ActionStatus::Initialization)?;
 
-  action.move_to_status(ActionStatus::PENDING);
+  action.move_to_status(ActionStatus::Pending);
   action.commitment = commitment_hash;
 
   emit!(event::ActionSubmitted {

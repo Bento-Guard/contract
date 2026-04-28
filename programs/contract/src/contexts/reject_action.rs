@@ -9,9 +9,9 @@ pub fn process(ctx: Context<RejectAction>) -> Result<()> {
   let agent = &mut ctx.accounts.agent;
   let action = &mut ctx.accounts.action.load_mut()?;
   action.must_belong_to_agent(agent.key())?;
-  action.must_be_in_status(ActionStatus::ESCALATED)?;
+  action.must_be_in_status(ActionStatus::Escalated)?;
 
-  action.move_to_status(ActionStatus::REJECTED);
+  action.move_to_status(ActionStatus::Rejected);
 
   emit!(event::EscalationResolved {
     action_id: action.action_id,

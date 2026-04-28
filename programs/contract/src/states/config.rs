@@ -70,11 +70,11 @@ impl Config {
 
   pub fn decision_for(&self, raw_score: u32) -> ActionStatus {
     if raw_score >= self.block_threshold {
-      ActionStatus::BLOCKED
+      ActionStatus::Blocked
     } else if raw_score >= self.escalate_threshold {
-      ActionStatus::ESCALATED
+      ActionStatus::Escalated
     } else {
-      ActionStatus::APPROVED
+      ActionStatus::Approved
     }
   }
 }

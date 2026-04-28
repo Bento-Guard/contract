@@ -15,7 +15,7 @@ pub fn process(ctx: Context<AppendPayload>, params: AppendPayloadParams) -> Resu
   let AppendPayloadParams { offset, chunk } = params;
 
   let action = &mut ctx.accounts.action.load()?;
-  action.must_be_in_status(ActionStatus::INITIALIZATION)?;
+  action.must_be_in_status(ActionStatus::Initialization)?;
 
   // Validate chunks fit
   require!(
