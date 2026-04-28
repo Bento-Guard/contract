@@ -85,3 +85,11 @@ pub struct AgentAutoDeactivated {
   pub threat_score: u32,
   pub strikes: u8,
 }
+
+#[event]
+pub struct EscalationResolved {
+  pub action_id: u64,
+  pub agent: Pubkey,
+  pub owner: Pubkey,
+  pub final_decision: u8,
+}

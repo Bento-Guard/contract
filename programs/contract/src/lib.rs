@@ -68,4 +68,12 @@ pub mod contract {
   pub fn verdict_action(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Result<()> {
     admin::verdict_action::process(ctx, params)
   }
+
+  pub fn approve_action(ctx: Context<ApproveAction>) -> Result<()> {
+    approve_action::process(ctx)
+  }
+
+  pub fn reject_action(ctx: Context<RejectAction>) -> Result<()> {
+    reject_action::process(ctx)
+  }
 }
