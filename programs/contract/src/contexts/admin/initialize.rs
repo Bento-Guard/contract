@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-  common::{event, PREFIX_SEED},
+  common::{error::BentoError, event, operator::OPERATOR_PUBKEY, PREFIX_SEED},
   Config,
 };
 
@@ -40,7 +40,10 @@ pub fn process(ctx: Context<InitializeConfig>, params: InitializeConfigParams) -
 
 #[derive(Accounts)]
 pub struct InitializeConfig<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = operator.key() == OPERATOR_PUBKEY @ BentoError::InvalidOperator
+  )]
   pub operator: Signer<'info>,
 
   #[account(
