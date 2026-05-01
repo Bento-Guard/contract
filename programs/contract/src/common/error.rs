@@ -37,4 +37,7 @@ pub enum BentoError {
 
   #[msg("Agent already active")]
   AgentAlreadyActive,
+
+  #[msg("Invalid agent owner")]
+  InvalidAgentOwner,
 }

@@ -8,18 +8,17 @@ import {
     delegationRecordPdaFromDelegatedAccount,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 
-export interface DelegateActionAccounts {
+export interface DelegateAgentAccounts {
     owner: PublicKey;
     agent: PublicKey;
-    action: PublicKey;
     config: PublicKey;
     ownerProgram: PublicKey;
 }
 
-export const delegateActionIx = async (
+export const delegateAgentIx = async (
     program: anchor.Program<Contract>,
     payload: {
-        accounts: DelegateActionAccounts;
+        accounts: DelegateAgentAccounts;
         /** Optional ER validator pubkey passed as the first remaining account during delegation. */
         validator?: PublicKey;
     },
@@ -35,25 +34,22 @@ export const delegateActionIx = async (
         : [];
 
     return await program.methods
-        .delegateAction()
+        .delegateAgent()
         .accountsPartial({
             owner: payload.accounts.owner,
             agent: payload.accounts.agent,
-            action: payload.accounts.action,
             config: payload.accounts.config,
             ownerProgram: payload.accounts.ownerProgram,
             delegationProgram: DELEGATION_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
-            bufferAction: delegateBufferPdaFromDelegatedAccountAndOwnerProgram(
-                payload.accounts.action,
+            bufferAgent: delegateBufferPdaFromDelegatedAccountAndOwnerProgram(
+                payload.accounts.agent,
                 payload.accounts.ownerProgram,
             ),
-            delegationMetadataAction: delegationMetadataPdaFromDelegatedAccount(
-                payload.accounts.action,
+            delegationMetadataAgent: delegationMetadataPdaFromDelegatedAccount(
+                payload.accounts.agent,
             ),
-            delegationRecordAction: delegationRecordPdaFromDelegatedAccount(
-                payload.accounts.action,
-            ),
+            delegationRecordAgent: delegationRecordPdaFromDelegatedAccount(payload.accounts.agent),
         })
         .remainingAccounts(remainingAccounts)
         .instruction();

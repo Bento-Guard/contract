@@ -31,6 +31,10 @@ pub mod contract {
     register_agent::process(ctx, params)
   }
 
+  pub fn delegate_agent(ctx: Context<DelegateAgent>) -> Result<()> {
+    delegate_agent::process(ctx)
+  }
+
   pub fn deactivate_agent(ctx: Context<DeactivateAgent>) -> Result<()> {
     deactivate_agent::process(ctx)
   }

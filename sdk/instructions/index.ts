@@ -1,6 +1,7 @@
 export * from "./admin";
 
 export * from "./register-agent.instruction";
+export * from "./delegate-agent.instruction";
 export * from "./active-agent.instruction";
 export * from "./deactivate-agent.instruction";
 export * from "./update-agent-program-target.instruction";

@@ -4,6 +4,9 @@ pub use admin::*;
 pub mod register_agent;
 pub use register_agent::*;
 
+pub mod delegate_agent;
+pub use delegate_agent::*;
+
 pub mod deactivate_agent;
 pub use deactivate_agent::*;
 
