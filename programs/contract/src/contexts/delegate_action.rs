@@ -64,11 +64,11 @@ pub struct DelegateAction<'info> {
   #[account(mut)]
   pub owner: Signer<'info>,
 
-  /// CHECK:
+  /// CHECK: Agent PDA delegated. Owner verified inside the handler.
   pub agent: AccountInfo<'info>,
 
   #[account(mut, del)]
-  /// CHECK:
+  /// CHECK: Action PDA being delegated. Agent Owner verified inside the handler.
   pub action: AccountInfo<'info>,
 
   #[account(

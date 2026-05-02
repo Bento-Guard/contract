@@ -12,6 +12,8 @@ import {
     SystemProgram,
     Transaction,
     TransactionInstruction,
+    TransactionMessage,
+    VersionedTransaction,
 } from "@solana/web3.js";
 import {
     GetCommitmentSignature,
@@ -28,9 +30,11 @@ import {
     commitmentHashAsArray,
     countAppendPayloadTxs,
     deactivateAgentIx,
+    decodeActionPayload,
     decryptFromAgent,
     delegateActionIx,
     delegateAgentIx,
+    encodeActionPayload,
     encryptForRelayer,
     finalizeActionBuildingIx,
     generateX25519Keypair,
@@ -696,19 +700,21 @@ describe("contract", () => {
                 lamports: BigInt(transferLamports.toString()),
             });
 
-            const serializedIx = {
-                programId: transferIx.programId.toBase58(),
-                keys: transferIx.keys.map((k) => ({
-                    pubkey: k.pubkey.toBase58(),
-                    isSigner: k.isSigner,
-                    isWritable: k.isWritable,
-                })),
-                data: Buffer.from(transferIx.data).toString("base64"),
-            };
-            plaintextBytes = Buffer.from(
-                JSON.stringify({ prompt: userPrompt, instruction: serializedIx }),
-                "utf8",
-            );
+            // Build a v0 VersionedTransaction the relayer can deserialize and
+            // execute as-is. The blockhash is a placeholder — the relayer
+            // re-fetches a fresh one before signing/submitting.
+            const message = new TransactionMessage({
+                payerKey: agentWalletKeypair.publicKey,
+                recentBlockhash: PublicKey.default.toBase58(),
+                instructions: [transferIx],
+            }).compileToV0Message();
+            const vtx = new VersionedTransaction(message);
+            const txBytes = vtx.serialize();
+
+            plaintextBytes = encodeActionPayload({
+                prompt: userPrompt,
+                tx: txBytes,
+            });
 
             const enc = encryptForRelayer({
                 plaintext: plaintextBytes,
@@ -876,25 +882,42 @@ describe("contract", () => {
                 relayerSecretKey: relayerEncryptionKeypair.secretKey,
             });
 
-            const decrypted = JSON.parse(Buffer.from(decryptedBytes).toString("utf8"));
-            expect(decrypted.prompt).to.equal(userPrompt);
-            expect(decrypted.instruction.programId).to.equal(
-                SystemProgram.programId.toBase58(),
+            const decoded = decodeActionPayload(decryptedBytes);
+            expect(decoded.prompt).to.equal(userPrompt);
+
+            const decodedVtx = VersionedTransaction.deserialize(decoded.tx);
+            const decodedMsg = decodedVtx.message;
+
+            // Walk the compiled instructions back to the original (programId,
+            // accounts, data) tuple so the relayer sees exactly what the agent
+            // intended — System program transferring `transferLamports` from
+            // agent wallet to recipient.
+            expect(decodedMsg.compiledInstructions.length).to.equal(1);
+            const ix = decodedMsg.compiledInstructions[0];
+            const programId = decodedMsg.staticAccountKeys[ix.programIdIndex];
+            expect(programId.toBase58()).to.equal(SystemProgram.programId.toBase58());
+
+            const ixAccountKeys = ix.accountKeyIndexes.map(
+                (i) => decodedMsg.staticAccountKeys[i],
             );
-            // The transfer ix has 2 keys: from (signer + writable) and to (writable).
-            expect(decrypted.instruction.keys.length).to.equal(2);
-            expect(decrypted.instruction.keys[0].pubkey).to.equal(
+            expect(ixAccountKeys.length).to.equal(2);
+            expect(ixAccountKeys[0].toBase58()).to.equal(
                 agentWalletKeypair.publicKey.toBase58(),
             );
-            expect(decrypted.instruction.keys[1].pubkey).to.equal(
+            expect(ixAccountKeys[1].toBase58()).to.equal(
                 recipientKeypair.publicKey.toBase58(),
+            );
+
+            // Bytes of the System transfer ix data must match what we built.
+            expect(Buffer.from(ix.data).equals(Buffer.from(transferIx.data))).to.equal(
+                true,
             );
 
             // Relayer-side commitment verification: hash the decrypted bytes
             // and check it matches what the SDK stored at finalize.
             const recomputed = commitmentHashAsArray(decryptedBytes);
             expect(Array.from(action.commitment)).to.deep.equal(recomputed);
-            console.log("  Decrypted prompt        :", decrypted.prompt);
+            console.log("  Decrypted prompt        :", decoded.prompt);
             console.log("  Commitment verified     : ✓");
         });
 
