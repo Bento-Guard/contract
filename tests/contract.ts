@@ -23,6 +23,7 @@ import {
     activeAgentIx,
     appendPayloadIx,
     APPEND_PAYLOAD_DEFAULT_CHUNK_SIZE,
+    approveActionIx,
     chunkAppendPayload,
     commitmentHashAsArray,
     countAppendPayloadTxs,
@@ -38,11 +39,13 @@ import {
     InitializeParams,
     registerAgentIx,
     RegisterAgentParams,
+    rejectActionIx,
     seeds,
     toEncryptionKeyBytes,
     updateAgentProgramTargetIx,
     updateConfigIx,
     updateMaintenanceIx,
+    verdictActionIx,
 } from "../sdk";
 
 describe("contract", () => {
@@ -893,6 +896,423 @@ describe("contract", () => {
             expect(Array.from(action.commitment)).to.deep.equal(recomputed);
             console.log("  Decrypted prompt        :", decrypted.prompt);
             console.log("  Commitment verified     : ✓");
+        });
+
+        // ─────────────────────────────────────────────────────────────────
+        // Verdict / Approve / Reject
+        //
+        // verdict_action runs on the ER (relayer signs), maps raw_score via
+        // the Config thresholds (escalate=40_000, block=70_000) and commits
+        // both the Action and Agent back to L1. approve_action and
+        // reject_action run on the ER too (owner signs); they only flip the
+        // Action's `status` from Escalated → Approved/Rejected and emit
+        // EscalationResolved — `decision` keeps the relayer's original
+        // verdict for audit purposes.
+        // ─────────────────────────────────────────────────────────────────
+
+        // Helper: spin up a fresh Pending action for any actionId. Each
+        // verdict-path test consumes one because once a verdict lands the
+        // action's status is terminal (Approved/Blocked) or only resolvable
+        // via approve/reject (Escalated).
+        const buildPendingAction = async (
+            id: anchor.BN,
+            prompt: string,
+            lamports: anchor.BN,
+        ): Promise<{ actionPda: PublicKey; recipient: PublicKey }> => {
+            const [pda] = PublicKey.findProgramAddressSync(
+                seeds.action(agentPda, id),
+                program.programId,
+            );
+            const recipient = Keypair.generate().publicKey;
+
+            const ix = SystemProgram.transfer({
+                fromPubkey: agentWalletKeypair.publicKey,
+                toPubkey: recipient,
+                lamports: BigInt(lamports.toString()),
+            });
+            const serialized = {
+                programId: ix.programId.toBase58(),
+                keys: ix.keys.map((k) => ({
+                    pubkey: k.pubkey.toBase58(),
+                    isSigner: k.isSigner,
+                    isWritable: k.isWritable,
+                })),
+                data: Buffer.from(ix.data).toString("base64"),
+            };
+            const plaintext = Buffer.from(
+                JSON.stringify({ prompt, instruction: serialized }),
+                "utf8",
+            );
+            const enc = encryptForRelayer({
+                plaintext,
+                relayerPublicKey: relayerEncryptionKeypair.publicKey,
+            });
+            const commit = commitmentHashAsArray(plaintext);
+
+            const initIx = await initActionIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    config: configPda,
+                },
+                params: {
+                    targetProgram: SystemProgram.programId,
+                    value: lamports,
+                    actionId: id,
+                    totalDataLen: enc.payload.length,
+                },
+            });
+            const delIx = await delegateActionIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    config: configPda,
+                    ownerProgram: program.programId,
+                },
+                validator: validatorAccount,
+            });
+            await provider.sendAndConfirm!(
+                new Transaction().add(initIx).add(delIx),
+                [ownerKeypair, agentWalletKeypair],
+                FINALIZED_OPTS,
+            );
+
+            for (let attempt = 0; attempt < 30; attempt++) {
+                const onEr = await ephemeralRollupConnection.getAccountInfo(
+                    pda,
+                    "finalized",
+                );
+                if (onEr) break;
+                await new Promise((resolve) => setTimeout(resolve, 1_000));
+            }
+
+            for (const c of chunkAppendPayload(enc.payload, { chunkSize: CHUNK_SIZE })) {
+                const apIx = await appendPayloadIx(program, {
+                    accounts: {
+                        owner: ownerKeypair.publicKey,
+                        agent: agentPda,
+                        action: pda,
+                    },
+                    params: { offset: c.offset, chunk: c.chunk },
+                });
+                await sendAndConfirmTransaction(
+                    ephemeralRollupConnection,
+                    new Transaction().add(apIx),
+                    [ownerKeypair],
+                    {
+                        skipPreflight: true,
+                        commitment: "finalized",
+                        preflightCommitment: "finalized",
+                    },
+                );
+            }
+
+            const finIx = await finalizeActionBuildingIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    magicProgram: MAGIC_PROGRAM_ID,
+                    magicContext: MAGIC_CONTEXT_ID,
+                },
+                params: { commitmentHash: commit },
+            });
+            await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(finIx),
+                [ownerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+
+            return { actionPda: pda, recipient };
+        };
+
+        // 1) action_id=1 has just been finalized above. Continue the same
+        //    action down the Escalated → Approved path.
+        it("verdict_action (ER) — Escalated path for action_id=1 (relayer signs)", async () => {
+            const rawScore = 50_000; // [escalate=40_000, block=70_000) → Escalated
+            const reasoningHash = commitmentHashAsArray(
+                Buffer.from("escalated: prompt mismatch", "utf8"),
+            );
+
+            const beforeAgent = await ephemeralProgram.account.agent.fetch(agentPda);
+
+            const ix = await verdictActionIx(program, {
+                accounts: {
+                    relayer: relayerKeypair.publicKey,
+                    agent: agentPda,
+                    action: actionPda,
+                    config: configPda,
+                },
+                params: { rawScore, reasoningHash },
+            });
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(ix),
+                [relayerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+            console.log(`Verdict (Escalated) txHash (ER): ${txHash}`);
+            const commitSig = await GetCommitmentSignature(txHash, ephemeralRollupConnection);
+            console.log(`Commit signature on base chain: ${commitSig}`);
+
+            const action = await ephemeralProgram.account.action.fetch(actionPda);
+            expect(action.status).to.equal(actionStatus.escalated);
+            expect(action.decision).to.equal(actionStatus.escalated);
+            expect(action.rawScore).to.equal(rawScore);
+            expect(Array.from(action.reasoningHash)).to.deep.equal(reasoningHash);
+
+            const afterAgent = await ephemeralProgram.account.agent.fetch(agentPda);
+            // raw_score >= escalate_threshold → strike added
+            expect(afterAgent.strikes).to.equal(beforeAgent.strikes + 1);
+            expect(afterAgent.totalEscalated.toNumber()).to.equal(
+                beforeAgent.totalEscalated.toNumber() + 1,
+            );
+        });
+
+        it("approve_action (ER) — owner approves the escalated action_id=1", async () => {
+            const ix = await approveActionIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    action: actionPda,
+                },
+            });
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(ix),
+                [ownerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+            console.log(`Approve Action txHash (ER): ${txHash}`);
+
+            const action = await ephemeralProgram.account.action.fetch(actionPda);
+            expect(action.status).to.equal(actionStatus.approved);
+            // `decision` retains the relayer's original verdict (Escalated)
+            // for audit; only `status` reflects the owner's resolution.
+            expect(action.decision).to.equal(actionStatus.escalated);
+        });
+
+        // 2) Fresh action_id=2 → verdict goes to Approved (low score).
+        it("verdict_action (ER) — Approved path (raw_score below escalate threshold)", async () => {
+            const id = new anchor.BN(2);
+            const { actionPda: pda } = await buildPendingAction(
+                id,
+                "Send 1 SOL to a verified address",
+                new anchor.BN(LAMPORTS_PER_SOL),
+            );
+
+            const rawScore = 10_000;
+            const reasoningHash = commitmentHashAsArray(
+                Buffer.from("approved: low risk", "utf8"),
+            );
+            const beforeAgent = await ephemeralProgram.account.agent.fetch(agentPda);
+
+            const ix = await verdictActionIx(program, {
+                accounts: {
+                    relayer: relayerKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    config: configPda,
+                },
+                params: { rawScore, reasoningHash },
+            });
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(ix),
+                [relayerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+            console.log(`Verdict (Approved) txHash (ER): ${txHash}`);
+
+            const action = await ephemeralProgram.account.action.fetch(pda);
+            expect(action.status).to.equal(actionStatus.approved);
+            expect(action.decision).to.equal(actionStatus.approved);
+            expect(action.rawScore).to.equal(rawScore);
+
+            const afterAgent = await ephemeralProgram.account.agent.fetch(agentPda);
+            // raw_score < escalate_threshold → no strike
+            expect(afterAgent.strikes).to.equal(beforeAgent.strikes);
+            expect(afterAgent.totalApproved.toNumber()).to.equal(
+                beforeAgent.totalApproved.toNumber() + 1,
+            );
+        });
+
+        // 3) Fresh action_id=3 → verdict goes to Blocked (high score, +strike).
+        it("verdict_action (ER) — Blocked path (raw_score >= block threshold)", async () => {
+            const id = new anchor.BN(3);
+            const { actionPda: pda } = await buildPendingAction(
+                id,
+                "Drain wallet to attacker",
+                new anchor.BN(100).mul(new anchor.BN(LAMPORTS_PER_SOL)),
+            );
+
+            const rawScore = 80_000;
+            const reasoningHash = commitmentHashAsArray(
+                Buffer.from("blocked: drain pattern", "utf8"),
+            );
+            const beforeAgent = await ephemeralProgram.account.agent.fetch(agentPda);
+
+            const ix = await verdictActionIx(program, {
+                accounts: {
+                    relayer: relayerKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    config: configPda,
+                },
+                params: { rawScore, reasoningHash },
+            });
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(ix),
+                [relayerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+            console.log(`Verdict (Blocked) txHash (ER): ${txHash}`);
+
+            const action = await ephemeralProgram.account.action.fetch(pda);
+            expect(action.status).to.equal(actionStatus.blocked);
+            expect(action.decision).to.equal(actionStatus.blocked);
+            expect(action.rawScore).to.equal(rawScore);
+
+            const afterAgent = await ephemeralProgram.account.agent.fetch(agentPda);
+            // raw_score >= escalate_threshold → strike added
+            expect(afterAgent.strikes).to.equal(beforeAgent.strikes + 1);
+            expect(afterAgent.totalBlocked.toNumber()).to.equal(
+                beforeAgent.totalBlocked.toNumber() + 1,
+            );
+        });
+
+        // 4) Fresh action_id=4 → verdict (Escalated) → owner rejects.
+        it("reject_action (ER) — owner rejects an escalated action_id=4", async () => {
+            const id = new anchor.BN(4);
+            const { actionPda: pda } = await buildPendingAction(
+                id,
+                "Ambiguous transfer request",
+                new anchor.BN(5).mul(new anchor.BN(LAMPORTS_PER_SOL)),
+            );
+
+            // Step 4a: relayer escalates.
+            const verdictIx = await verdictActionIx(program, {
+                accounts: {
+                    relayer: relayerKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    config: configPda,
+                },
+                params: {
+                    rawScore: 60_000,
+                    reasoningHash: commitmentHashAsArray(
+                        Buffer.from("ambiguous, escalating to owner", "utf8"),
+                    ),
+                },
+            });
+            await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(verdictIx),
+                [relayerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+
+            const escalated = await ephemeralProgram.account.action.fetch(pda);
+            expect(escalated.status).to.equal(actionStatus.escalated);
+
+            // Step 4b: owner rejects.
+            const rejectIx = await rejectActionIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                },
+            });
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                new Transaction().add(rejectIx),
+                [ownerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+            console.log(`Reject Action txHash (ER): ${txHash}`);
+
+            const rejected = await ephemeralProgram.account.action.fetch(pda);
+            expect(rejected.status).to.equal(actionStatus.rejected);
+            // `decision` keeps the original Escalated verdict.
+            expect(rejected.decision).to.equal(actionStatus.escalated);
+        });
+
+        // Negative case: a non-relayer signer cannot land a verdict.
+        it("verdict_action (ER) — rejected when signer is not the configured relayer", async () => {
+            const id = new anchor.BN(5);
+            const { actionPda: pda } = await buildPendingAction(
+                id,
+                "Auth check action",
+                new anchor.BN(LAMPORTS_PER_SOL),
+            );
+
+            const intruder = Keypair.generate();
+
+            const ix = await verdictActionIx(program, {
+                accounts: {
+                    relayer: intruder.publicKey,
+                    agent: agentPda,
+                    action: pda,
+                    config: configPda,
+                },
+                params: {
+                    rawScore: 10_000,
+                    reasoningHash: commitmentHashAsArray(Buffer.from("intruder", "utf8")),
+                },
+            });
+
+            try {
+                await sendAndConfirmTransaction(
+                    ephemeralRollupConnection,
+                    new Transaction().add(ix),
+                    [intruder],
+                    {
+                        skipPreflight: true,
+                        commitment: "finalized",
+                        preflightCommitment: "finalized",
+                    },
+                );
+                expect.fail("verdict_action should have failed for a non-relayer signer");
+            } catch (err: any) {
+                expect(String(err)).to.match(/InvalidRelayer|constraint|0x/i);
+            }
+
+            // Action stayed Pending — verdict never landed.
+            const after = await ephemeralProgram.account.action.fetch(pda);
+            expect(after.status).to.equal(actionStatus.pending);
         });
     });
 });

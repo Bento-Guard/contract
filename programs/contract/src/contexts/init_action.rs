@@ -67,9 +67,7 @@ pub struct InitAction<'info> {
 
   pub agent_wallet: Signer<'info>,
 
-  /// CHECK: Agent PDA. Owner field verified inside the handler. Read as
-  /// `AccountInfo` because the agent is delegated to the ER, so on L1 it is
-  /// owned by the delegation program and `Account<Agent>` would reject it.
+  /// CHECK: Agent PDA. Owner field verified inside the handler.
   #[account(
     seeds = [constant::PREFIX_SEED, b"agent", agent_wallet.key().as_ref()],
     bump,
