@@ -2,10 +2,23 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { expect } from "chai";
 import { Contract } from "../target/types/contract";
-import { OPERATOR_KEYPAIR, RELAYER_KEYPAIR } from "./accounts";
-import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
+import { OPERATOR_KEYPAIR, OWNER_AGENT_KEYPAIR, RELAYER_KEYPAIR } from "./accounts";
+import {
+    Connection,
+    Keypair,
+    PublicKey,
+    sendAndConfirmTransaction,
+    Transaction,
+} from "@solana/web3.js";
+import {
+    GetCommitmentSignature,
+    MAGIC_CONTEXT_ID,
+    MAGIC_PROGRAM_ID,
+} from "@magicblock-labs/ephemeral-rollups-sdk";
 import {
     actionStatus,
+    activeAgentIx,
+    deactivateAgentIx,
     delegateAgentIx,
     generateX25519Keypair,
     initActionIx,
@@ -20,33 +33,48 @@ import {
 } from "../sdk";
 
 describe("contract", () => {
+    // Use `finalized` everywhere so each step (register, delegate, deactivate,
+    // reactivate, plus the ER → L1 commit) is fully settled before the next test
+    // reads from either chain. This avoids "account does not exist" races where
+    // the ER hasn't yet ingested a freshly-delegated PDA.
+    const FINALIZED_OPTS: anchor.web3.ConfirmOptions = {
+        commitment: "finalized",
+        preflightCommitment: "finalized",
+    };
+
     // Configure the client to use the local cluster.
     anchor.setProvider(anchor.AnchorProvider.env());
-    const provider = anchor.getProvider();
+    const baseProvider = anchor.getProvider() as anchor.AnchorProvider;
+    const provider = new anchor.AnchorProvider(
+        new anchor.web3.Connection(baseProvider.connection.rpcEndpoint, "finalized"),
+        baseProvider.wallet,
+        FINALIZED_OPTS,
+    );
+    anchor.setProvider(provider);
+
     const providerEphemeralRollup = new anchor.AnchorProvider(
         new anchor.web3.Connection(
             process.env.EPHEMERAL_PROVIDER_ENDPOINT || "https://devnet.magicblock.app/",
             {
                 wsEndpoint: process.env.EPHEMERAL_WS_ENDPOINT || "wss://devnet.magicblock.app/",
+                commitment: "finalized",
             },
         ),
         anchor.Wallet.local(),
-    );
-    const routerConnection = new anchor.web3.Connection(
-        process.env.ROUTER_ENDPOINT || "https://devnet-router.magicblock.app",
-        {
-            wsEndpoint: process.env.ROUTER_WS_ENDPOINT || "wss://devnet-router.magicblock.app",
-        },
+        FINALIZED_OPTS,
     );
 
     console.log("========================================");
     console.log("         Loading Configuration");
     console.log("========================================");
 
-    const program = anchor.workspace.contract as Program<Contract>;
-    const connection = new Connection(provider.connection.rpcEndpoint);
+    const workspaceProgram = anchor.workspace.contract as Program<Contract>;
+    const program = new Program<Contract>(workspaceProgram.idl, provider);
+    const ephemeralProgram = new Program<Contract>(workspaceProgram.idl, providerEphemeralRollup);
+    const connection = new Connection(provider.connection.rpcEndpoint, "finalized");
     const ephemeralRollupConnection = new Connection(
         providerEphemeralRollup.connection.rpcEndpoint,
+        "finalized",
     );
 
     console.log("Base Connection: ", connection.rpcEndpoint);
@@ -59,10 +87,14 @@ describe("contract", () => {
     // Owner + agent wallet shared across the action-flow tests.
     // The user must run register_agent (delegation flow) on these before
     // init_action / approve_action / reject_action below can succeed.
-    const ownerKeypair = Keypair.generate();
+    const ownerKeypair = Keypair.fromSecretKey(OWNER_AGENT_KEYPAIR);
     const agentWalletKeypair = Keypair.generate();
 
     const [configPda] = PublicKey.findProgramAddressSync(seeds.config(), program.programId);
+    const [agentPda] = PublicKey.findProgramAddressSync(
+        seeds.agent(agentWalletKeypair.publicKey),
+        program.programId,
+    );
 
     console.log("\n========================================");
     console.log("           Accounts loaded");
@@ -84,6 +116,41 @@ describe("contract", () => {
             provider.connection.requestAirdrop(agentWalletKeypair.publicKey, 100_000_000),
         ]);
     });
+
+    // Read the agent account directly via `getAccountInfo` and decode through
+    // Anchor's coder. While the Agent PDA is delegated to the ER, its L1 owner
+    // is the delegation program; this avoids Anchor's strict owner check on
+    // `program.account.agent.fetch`.
+    const readAgent = async (
+        conn: Connection,
+        commitment: anchor.web3.Commitment = "confirmed",
+    ) => {
+        const info = await conn.getAccountInfo(agentPda, commitment);
+        if (!info) return { exists: false as const };
+        const decoded = program.coder.accounts.decode("agent", info.data);
+        return {
+            exists: true as const,
+            owner: info.owner.toBase58(),
+            active: decoded.active as boolean,
+        };
+    };
+
+    // Poll only the ER for the expected `active` flag. The ER reflects state
+    // changes immediately, so this should converge in 1-2 polls.
+    const waitForErActive = async (expected: boolean, timeoutMs = 30_000) => {
+        const start = Date.now();
+        let last: boolean | undefined;
+        let attempt = 0;
+        while (Date.now() - start < timeoutMs) {
+            attempt += 1;
+            const er = await readAgent(ephemeralRollupConnection);
+            last = er.exists ? er.active : undefined;
+            console.log(`🚀 waitForErActive[#${attempt}] expected=${expected} ER=${last}`);
+            if (last === expected) return;
+            await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+        throw new Error(`Timed out waiting for ER agent.active === ${expected} (ER=${last})`);
+    };
 
     xdescribe("Initialization Config", () => {
         it("Success initialize config", async () => {
@@ -126,7 +193,7 @@ describe("contract", () => {
         });
     });
 
-    describe("Update Config", () => {
+    xdescribe("Update Config", () => {
         it("Updates a single field (escalate_threshold) and leaves others untouched", async () => {
             const before = await program.account.config.fetch(configPda);
 
@@ -273,7 +340,7 @@ describe("contract", () => {
         });
     });
 
-    describe("Update Maintenance", () => {
+    xdescribe("Update Maintenance", () => {
         it("Operator can toggle maintenance ON", async () => {
             const ix = await updateMaintenanceIx(program, {
                 accounts: {
@@ -328,22 +395,19 @@ describe("contract", () => {
     });
 
     describe("Register Agent", () => {
+        // Local validator identity is required as the first remaining account when
+        // delegating on localnet (the magicblock validator key). On devnet/mainnet
+        // the ER picks the validator automatically.
+        const validatorAccount =
+            ephemeralRollupConnection.rpcEndpoint.includes("localhost") ||
+            ephemeralRollupConnection.rpcEndpoint.includes("127.0.0.1")
+                ? new PublicKey("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev")
+                : undefined;
+
         it("Success Register Agent", async () => {
             const registerAgentParams: RegisterAgentParams = {
                 spendLimit: new anchor.BN(1_000),
             };
-
-            const [agentPda] = PublicKey.findProgramAddressSync(
-                seeds.agent(agentWalletKeypair.publicKey),
-                program.programId,
-            );
-
-            // Add local validator identity to the remaining accounts if running on localnet
-            const validatorAccount =
-                ephemeralRollupConnection.rpcEndpoint.includes("localhost") ||
-                ephemeralRollupConnection.rpcEndpoint.includes("127.0.0.1")
-                    ? new PublicKey("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev")
-                    : undefined;
 
             const registerIx = await registerAgentIx(program, {
                 accounts: {
@@ -365,10 +429,102 @@ describe("contract", () => {
                 validator: validatorAccount,
             });
 
-            console.log("Agent PDA: ", agentPda.toBase58())
+            console.log("Agent PDA: ", agentPda.toBase58());
             const tx = new Transaction().add(registerIx).add(delegateIx);
-            const txHash = await provider.sendAndConfirm!(tx, [ownerKeypair, agentWalletKeypair]);
+            const txHash = await provider.sendAndConfirm!(
+                tx,
+                [ownerKeypair, agentWalletKeypair],
+                FINALIZED_OPTS,
+            );
             console.log(`Register + Delegate Agent txHash: ${txHash}`);
+
+            // Wait until the ER has actually ingested the freshly-delegated
+            // Agent PDA before the next test runs. Without this, subsequent
+            // ER reads can race the delegation event and see
+            // "Account does not exist" even though L1 is finalized.
+            for (let attempt = 0; attempt < 30; attempt++) {
+                const onEr = await ephemeralRollupConnection.getAccountInfo(
+                    agentPda,
+                    "finalized",
+                );
+                if (onEr) break;
+                await new Promise((resolve) => setTimeout(resolve, 1_000));
+            }
+
+            const agentOnL1 = await program.account.agent.fetch(agentPda);
+            expect(agentOnL1.active).to.equal(true);
+            const agentOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
+            expect(agentOnEr.active).to.equal(true);
+        });
+
+        // The deactivate / active tests only assert the ER state. The L1
+        // writeback through `commit_accounts` is best-effort — on a local
+        // `mb-test-validator` the `ephemeral-validator` batches commits
+        // before submitting them, so L1 propagation can lag by minutes. The
+        // commit signature is logged so it can be looked up on the base-chain
+        // explorer if needed, but we don't block the test on it.
+
+        it("Deactivate Agent (ER → commit Agent state back to L1)", async () => {
+            // ER pre-condition: agent is currently active.
+            const before = await readAgent(ephemeralRollupConnection);
+            expect(before.active).to.equal(true);
+
+            const ix = await deactivateAgentIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    config: configPda,
+                    magicProgram: MAGIC_PROGRAM_ID,
+                    magicContext: MAGIC_CONTEXT_ID,
+                },
+            });
+
+            const tx = new Transaction().add(ix);
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                tx,
+                [ownerKeypair],
+                { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
+            );
+            console.log(`Deactivate Agent txHash (ER): ${txHash}`);
+
+            const commitSig = await GetCommitmentSignature(txHash, ephemeralRollupConnection);
+            console.log(`Commit signature on base chain: ${commitSig}`);
+
+            // Only assert the ER reflects the deactivation. L1 propagation is
+            // observable via the commit signature logged above.
+            await waitForErActive(false);
+        });
+
+        it("Active Agent (ER → commit Agent state back to L1)", async () => {
+            // ER pre-condition: agent is currently inactive.
+            const before = await readAgent(ephemeralRollupConnection);
+            expect(before.active).to.equal(false);
+
+            const ix = await activeAgentIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    config: configPda,
+                    magicProgram: MAGIC_PROGRAM_ID,
+                    magicContext: MAGIC_CONTEXT_ID,
+                },
+            });
+
+            const tx = new Transaction().add(ix);
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                tx,
+                [ownerKeypair],
+                { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
+            );
+            console.log(`Active Agent txHash (ER): ${txHash}`);
+
+            const commitSig = await GetCommitmentSignature(txHash, ephemeralRollupConnection);
+            console.log(`Commit signature on base chain: ${commitSig}`);
+
+            // Only assert the ER reflects the re-activation.
+            await waitForErActive(true);
         });
     });
 

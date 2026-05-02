@@ -76,7 +76,7 @@ We use MagicBlock ER (non-TEE) for the **action processing hot path**. ER provid
 | Account     | Location                            | Reason |
 |-------------|-------------------------------------|--------|
 | Config PDA  | L1 only                             | Rarely changes, globally readable |
-| Agent PDA   | L1 → delegated to ER on register / re-activate | Hot path during active use; committed back to L1 on deactivate / on every verdict / on finalize |
+| Agent PDA   | L1 → delegated to ER on register, then stays delegated for its whole lifecycle | Hot path during active use; state committed back to L1 on every verdict, finalize, deactivate, and re-activate (Agent stays delegated to ER throughout — `deactivate_agent` and `active_agent` only mirror the new `active` flag to L1) |
 | Action PDA  | Created on L1 → delegated to ER     | Chunked writes and verdict happen in ER; committed back to L1 at finalize and at verdict |
 
 The inline `allowed_targets` whitelist is part of the Agent PDA (not a separate account), so it follows the agent through delegation.
@@ -215,8 +215,8 @@ There is **no separate `Decision` enum** — the `decision` field is a `u8` mirr
 | Instruction | Caller | Where | Purpose |
 |-------------|--------|-------|---------|
 | `register_agent` | Owner + agent wallet (co-signers) | L1 → delegate Agent to ER | Create Agent PDA, set `spend_limit`, mark active, delegate to ER |
-| `deactivate_agent` | Owner | ER → commit + undelegate to L1 | Set `active = false`, commit and undelegate the Agent |
-| `active_agent` | Owner | L1 → delegate Agent to ER | Re-activate a previously deactivated agent and re-delegate (errors with `AgentAlreadyActive` if already on) |
+| `deactivate_agent` | Owner | ER → commit only (no undelegate) | Set `active = false` and commit the Agent state back to L1 via `commit_accounts`. The Agent PDA remains delegated to the ER after this call — only the data is mirrored to L1 |
+| `active_agent` | Owner | ER → commit only (no re-delegate) | Set `active = true` and commit the Agent state back to L1 via `commit_accounts`. Errors with `AgentAlreadyActive` if the agent is currently active. The Agent PDA stays delegated to the ER throughout the lifecycle, so this is a pure state flip — no delegation churn |
 | `update_agent_program_target` | Owner + agent wallet | ER (commits Agent back to L1) | Add a new entry to `allowed_targets`, or toggle an existing one's `allowed` boolean |
 
 `register_agent` and `active_agent` accept an optional ER validator pubkey as the first remaining account when delegating.
