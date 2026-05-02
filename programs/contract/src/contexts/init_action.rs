@@ -24,6 +24,20 @@ pub fn process(ctx: Context<InitAction>, params: InitActionParams) -> Result<()>
     BentoError::PayloadTooLarge
   );
 
+  // The Agent PDA stays delegated to the ER for its whole lifecycle, so on
+  // L1 its owner is the delegation program — Anchor's `Account<Agent>` would
+  // reject that. Read the agent through `AccountInfo`, deserialize the
+  // committed L1 stub manually, and verify the owner field matches the
+  // signer. Seeds derivation already guarantees `agent.agent_wallet ==
+  // agent_wallet.key()`.
+  {
+    let agent_data = ctx.accounts.agent.try_borrow_data()?;
+    let agent = Agent::try_deserialize(&mut &agent_data[..])?;
+    if agent.owner != ctx.accounts.owner.key() {
+      return err!(BentoError::InvalidAgentOwner);
+    }
+  }
+
   let action = &mut ctx.accounts.action.load_init()?;
 
   action.init(
@@ -53,11 +67,14 @@ pub struct InitAction<'info> {
 
   pub agent_wallet: Signer<'info>,
 
+  /// CHECK: Agent PDA. Owner field verified inside the handler. Read as
+  /// `AccountInfo` because the agent is delegated to the ER, so on L1 it is
+  /// owned by the delegation program and `Account<Agent>` would reject it.
   #[account(
-    has_one = owner,
-    has_one = agent_wallet,
- )]
-  pub agent: Account<'info, Agent>, // Still in ER
+    seeds = [constant::PREFIX_SEED, b"agent", agent_wallet.key().as_ref()],
+    bump,
+  )]
+  pub agent: AccountInfo<'info>,
 
   #[account(
     init,

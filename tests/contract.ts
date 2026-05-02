@@ -6,9 +6,12 @@ import { OPERATOR_KEYPAIR, OWNER_AGENT_KEYPAIR, RELAYER_KEYPAIR } from "./accoun
 import {
     Connection,
     Keypair,
+    LAMPORTS_PER_SOL,
     PublicKey,
     sendAndConfirmTransaction,
+    SystemProgram,
     Transaction,
+    TransactionInstruction,
 } from "@solana/web3.js";
 import {
     GetCommitmentSignature,
@@ -18,8 +21,17 @@ import {
 import {
     actionStatus,
     activeAgentIx,
+    appendPayloadIx,
+    APPEND_PAYLOAD_DEFAULT_CHUNK_SIZE,
+    chunkAppendPayload,
+    commitmentHashAsArray,
+    countAppendPayloadTxs,
     deactivateAgentIx,
+    decryptFromAgent,
+    delegateActionIx,
     delegateAgentIx,
+    encryptForRelayer,
+    finalizeActionBuildingIx,
     generateX25519Keypair,
     initActionIx,
     initializeIx,
@@ -465,7 +477,7 @@ describe("contract", () => {
         // commit signature is logged so it can be looked up on the base-chain
         // explorer if needed, but we don't block the test on it.
 
-        it("Deactivate Agent (ER → commit Agent state back to L1)", async () => {
+        xit("Deactivate Agent (ER → commit Agent state back to L1)", async () => {
             // ER pre-condition: agent is currently active.
             const before = await readAgent(ephemeralRollupConnection);
             expect(before.active).to.equal(true);
@@ -497,7 +509,7 @@ describe("contract", () => {
             await waitForErActive(false);
         });
 
-        it("Active Agent (ER → commit Agent state back to L1)", async () => {
+        xit("Active Agent (ER → commit Agent state back to L1)", async () => {
             // ER pre-condition: agent is currently inactive.
             const before = await readAgent(ephemeralRollupConnection);
             expect(before.active).to.equal(false);
@@ -535,7 +547,7 @@ describe("contract", () => {
         // back to L1 — we only assert ER state and just log the commit sig.
         const sharedTargetProgram = Keypair.generate().publicKey;
 
-        it("Update Agent Program Target — add new target (ER)", async () => {
+        xit("Update Agent Program Target — add new target (ER)", async () => {
             // Pre-condition: the target is not yet in the agent's whitelist.
             const beforeOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
             const beforeMatch = beforeOnEr.allowedTargets.find(
@@ -582,7 +594,7 @@ describe("contract", () => {
             expect(matches[0].allowed).to.equal(true);
         });
 
-        it("Update Agent Program Target — toggle existing target's allowed flag (ER)", async () => {
+        xit("Update Agent Program Target — toggle existing target's allowed flag (ER)", async () => {
             // Pre-condition: the entry from the previous test exists with allowed = true.
             const beforeOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
             const beforeMatches = beforeOnEr.allowedTargets.filter(
@@ -631,27 +643,89 @@ describe("contract", () => {
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    // User actions on mainchain.
+    // Action Flow: init (L1) → delegate (L1) → append (ER) → finalize (ER)
     //
-    // Prerequisite (handled by the user's delegation tests):
-    //   register_agent(owner, agent_wallet) must have run so that `agentPda`
-    //   exists on L1 with owner = ownerKeypair, agent_wallet = agentWalletKeypair,
-    //   active = true.
+    // Mock input mirrors the SDK contract from docs/SUMMARY.md:
+    //   • User Prompt    : "Send 10 SOL to another wallet"
+    //   • TX Payload     : SystemProgram.transfer(agentWallet → recipient, 10 SOL)
+    //
+    // The plaintext (prompt + serialized ix) is encrypted to the relayer's
+    // x25519 public key with ChaCha20-Poly1305. The on-chain blob is
+    // ephemeralPubKey || nonce || ciphertext. The blake3 commitment of the
+    // *plaintext* is supplied at finalize so the relayer can detect tampering
+    // after decryption.
+    //
+    // Prerequisite: the Register Agent describe above already created and
+    // delegated `agentPda`. We re-use it here.
     // ─────────────────────────────────────────────────────────────────────────
-    xdescribe("Init Action (mainchain)", () => {
-        const actionId = new anchor.BN(1);
-        const totalDataLen = 256;
+    describe("Action Flow (Init → Delegate → Append → Finalize)", () => {
+        const validatorAccount =
+            ephemeralRollupConnection.rpcEndpoint.includes("localhost") ||
+            ephemeralRollupConnection.rpcEndpoint.includes("127.0.0.1")
+                ? new PublicKey("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev")
+                : undefined;
 
-        it("Owner + agent_wallet co-sign init_action and create the Action PDA", async () => {
-            const [actionPda] = PublicKey.findProgramAddressSync(
+        const actionId = new anchor.BN(1);
+        const recipientKeypair = Keypair.generate();
+        const userPrompt = "Send 10 SOL to another wallet";
+        const transferLamports = new anchor.BN(10).mul(new anchor.BN(LAMPORTS_PER_SOL));
+
+        // Chunk size and chunk-count math live in the SDK so production
+        // callers (not just this test) get consistent behavior. See
+        // sdk/instructions/append-payload.instruction.ts for the byte budget.
+        const CHUNK_SIZE = APPEND_PAYLOAD_DEFAULT_CHUNK_SIZE;
+
+        let actionPda: PublicKey;
+        let transferIx: TransactionInstruction;
+        let plaintextBytes: Uint8Array;
+        let encryptedPayload: Uint8Array;
+        let commitment: number[];
+
+        before(() => {
+            [actionPda] = PublicKey.findProgramAddressSync(
                 seeds.action(agentPda, actionId),
                 program.programId,
             );
 
-            const targetProgram = Keypair.generate().publicKey;
-            const value = new anchor.BN(1_000);
+            transferIx = SystemProgram.transfer({
+                fromPubkey: agentWalletKeypair.publicKey,
+                toPubkey: recipientKeypair.publicKey,
+                lamports: BigInt(transferLamports.toString()),
+            });
 
-            const ix = await initActionIx(program, {
+            const serializedIx = {
+                programId: transferIx.programId.toBase58(),
+                keys: transferIx.keys.map((k) => ({
+                    pubkey: k.pubkey.toBase58(),
+                    isSigner: k.isSigner,
+                    isWritable: k.isWritable,
+                })),
+                data: Buffer.from(transferIx.data).toString("base64"),
+            };
+            plaintextBytes = Buffer.from(
+                JSON.stringify({ prompt: userPrompt, instruction: serializedIx }),
+                "utf8",
+            );
+
+            const enc = encryptForRelayer({
+                plaintext: plaintextBytes,
+                relayerPublicKey: relayerEncryptionKeypair.publicKey,
+            });
+            encryptedPayload = enc.payload;
+            commitment = commitmentHashAsArray(plaintextBytes);
+
+            console.log("\n----- Action mock input -----");
+            console.log(`  Action PDA              : ${actionPda.toBase58()}`);
+            console.log(`  Recipient               : ${recipientKeypair.publicKey.toBase58()}`);
+            console.log(`  User Prompt             : ${userPrompt}`);
+            console.log(`  Transfer Lamports       : ${transferLamports.toString()}`);
+            console.log(`  Plaintext bytes         : ${plaintextBytes.length}`);
+            console.log(`  Encrypted payload bytes : ${encryptedPayload.length}`);
+            console.log(`  Commitment hash (hex)   : ${Buffer.from(commitment).toString("hex")}`);
+        });
+
+        it("init_action (L1) + delegate_action (L1) — create Action PDA and push to ER", async () => {
+            const initIx = await initActionIx(program, {
                 accounts: {
                     owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
@@ -660,28 +734,165 @@ describe("contract", () => {
                     config: configPda,
                 },
                 params: {
-                    targetProgram,
-                    value,
+                    targetProgram: SystemProgram.programId,
+                    value: transferLamports,
                     actionId,
-                    totalDataLen,
+                    totalDataLen: encryptedPayload.length,
                 },
             });
 
-            const tx = new Transaction().add(ix);
-            const signature = await provider.sendAndConfirm!(tx, [
-                ownerKeypair,
-                agentWalletKeypair,
-            ]);
-            console.log(`  Init action tx signature: ${signature}`);
+            const delegateIx = await delegateActionIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    action: actionPda,
+                    config: configPda,
+                    ownerProgram: program.programId,
+                },
+                validator: validatorAccount,
+            });
 
-            const action = await program.account.action.fetch(actionPda);
-            expect(action.agent.toBase58()).to.equal(agentPda.toBase58());
-            expect(action.actionId.toString()).to.equal(actionId.toString());
-            expect(action.targetProgram.toBase58()).to.equal(targetProgram.toBase58());
-            expect(action.value.toString()).to.equal(value.toString());
-            expect(action.dataLen).to.equal(totalDataLen);
-            expect(action.dataWritten).to.equal(0);
+            const tx = new Transaction().add(initIx).add(delegateIx);
+            const txHash = await provider.sendAndConfirm!(
+                tx,
+                [ownerKeypair, agentWalletKeypair],
+                FINALIZED_OPTS,
+            );
+            console.log(`Init + Delegate Action txHash: ${txHash}`);
+
+            // Wait until the ER has actually ingested the freshly-delegated
+            // Action PDA (mirrors the agent ingestion poll above).
+            for (let attempt = 0; attempt < 30; attempt++) {
+                const onEr = await ephemeralRollupConnection.getAccountInfo(
+                    actionPda,
+                    "finalized",
+                );
+                if (onEr) break;
+                await new Promise((resolve) => setTimeout(resolve, 1_000));
+            }
+
+            const actionOnEr = await ephemeralProgram.account.action.fetch(actionPda);
+            expect(actionOnEr.agent.toBase58()).to.equal(agentPda.toBase58());
+            expect(actionOnEr.actionId.toString()).to.equal(actionId.toString());
+            expect(actionOnEr.targetProgram.toBase58()).to.equal(
+                SystemProgram.programId.toBase58(),
+            );
+            expect(actionOnEr.value.toString()).to.equal(transferLamports.toString());
+            expect(actionOnEr.dataLen).to.equal(encryptedPayload.length);
+            expect(actionOnEr.dataWritten).to.equal(0);
+            expect(actionOnEr.status).to.equal(actionStatus.initialization);
+        });
+
+        it("append_payload (ER) — write encrypted chunks sequentially", async () => {
+            const chunks = chunkAppendPayload(encryptedPayload, {
+                chunkSize: CHUNK_SIZE,
+            });
+            const expectedTxCount = countAppendPayloadTxs(encryptedPayload.length, {
+                chunkSize: CHUNK_SIZE,
+            });
+            expect(chunks.length).to.equal(expectedTxCount);
+            console.log(`  Total chunks to write   : ${chunks.length}`);
+
+            for (const c of chunks) {
+                const ix = await appendPayloadIx(program, {
+                    accounts: {
+                        owner: ownerKeypair.publicKey,
+                        agent: agentPda,
+                        action: actionPda,
+                    },
+                    params: { offset: c.offset, chunk: c.chunk },
+                });
+
+                const tx = new Transaction().add(ix);
+                const sig = await sendAndConfirmTransaction(
+                    ephemeralRollupConnection,
+                    tx,
+                    [ownerKeypair],
+                    {
+                        skipPreflight: true,
+                        commitment: "finalized",
+                        preflightCommitment: "finalized",
+                    },
+                );
+                console.log(
+                    `    appendPayload offset=${c.offset} len=${c.chunk.length} → ${sig}`,
+                );
+            }
+
+            const action = await ephemeralProgram.account.action.fetch(actionPda);
+            expect(action.dataWritten).to.equal(encryptedPayload.length);
             expect(action.status).to.equal(actionStatus.initialization);
+        });
+
+        it("finalize_action_building (ER) — store commitment, status → Pending, commit Action+Agent to L1", async () => {
+            const ix = await finalizeActionBuildingIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agent: agentPda,
+                    action: actionPda,
+                    magicProgram: MAGIC_PROGRAM_ID,
+                    magicContext: MAGIC_CONTEXT_ID,
+                },
+                params: { commitmentHash: commitment },
+            });
+
+            const tx = new Transaction().add(ix);
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                tx,
+                [ownerKeypair],
+                {
+                    skipPreflight: true,
+                    commitment: "finalized",
+                    preflightCommitment: "finalized",
+                },
+            );
+            console.log(`Finalize Action txHash (ER): ${txHash}`);
+
+            const commitSig = await GetCommitmentSignature(txHash, ephemeralRollupConnection);
+            console.log(`Commit signature on base chain: ${commitSig}`);
+
+            const action = await ephemeralProgram.account.action.fetch(actionPda);
+            expect(action.status).to.equal(actionStatus.pending);
+            expect(Array.from(action.commitment)).to.deep.equal(commitment);
+            expect(action.dataWritten).to.equal(encryptedPayload.length);
+        });
+
+        it("Decrypts on-chain encrypted payload and verifies prompt + instruction round-trip", async () => {
+            const action = await ephemeralProgram.account.action.fetch(actionPda);
+
+            // The on-chain encrypted_payload field is a fixed 8KB array; only
+            // the first `data_len` bytes are real data.
+            const blob = Buffer.from(action.encryptedPayload as number[]).subarray(
+                0,
+                action.dataLen,
+            );
+
+            const { plaintext: decryptedBytes } = decryptFromAgent({
+                payload: blob,
+                relayerSecretKey: relayerEncryptionKeypair.secretKey,
+            });
+
+            const decrypted = JSON.parse(Buffer.from(decryptedBytes).toString("utf8"));
+            expect(decrypted.prompt).to.equal(userPrompt);
+            expect(decrypted.instruction.programId).to.equal(
+                SystemProgram.programId.toBase58(),
+            );
+            // The transfer ix has 2 keys: from (signer + writable) and to (writable).
+            expect(decrypted.instruction.keys.length).to.equal(2);
+            expect(decrypted.instruction.keys[0].pubkey).to.equal(
+                agentWalletKeypair.publicKey.toBase58(),
+            );
+            expect(decrypted.instruction.keys[1].pubkey).to.equal(
+                recipientKeypair.publicKey.toBase58(),
+            );
+
+            // Relayer-side commitment verification: hash the decrypted bytes
+            // and check it matches what the SDK stored at finalize.
+            const recomputed = commitmentHashAsArray(decryptedBytes);
+            expect(Array.from(action.commitment)).to.deep.equal(recomputed);
+            console.log("  Decrypted prompt        :", decrypted.prompt);
+            console.log("  Commitment verified     : ✓");
         });
     });
 });

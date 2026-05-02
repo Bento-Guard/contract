@@ -7,16 +7,20 @@ use crate::{
 };
 
 pub fn process(ctx: Context<FinalizeActionBuilding>, commitment_hash: [u8; 32]) -> Result<()> {
-  let action = &mut ctx.accounts.action.load_mut()?;
-  action.must_belong_to_agent(ctx.accounts.agent.key())?;
-  action.must_be_in_status(ActionStatus::Initialization)?;
+  let (action_id, agent_key) = {
+    let mut action = ctx.accounts.action.load_mut()?;
+    action.must_belong_to_agent(ctx.accounts.agent.key())?;
+    action.must_be_in_status(ActionStatus::Initialization)?;
 
-  action.move_to_status(ActionStatus::Pending);
-  action.commitment = commitment_hash;
+    action.move_to_status(ActionStatus::Pending);
+    action.commitment = commitment_hash;
+
+    (action.action_id, action.agent)
+  };
 
   emit!(event::ActionSubmitted {
-    action_id: action.action_id,
-    agent: action.agent,
+    action_id,
+    agent: agent_key,
   });
 
   commit_accounts(
@@ -38,7 +42,7 @@ pub struct FinalizeActionBuilding<'info> {
   #[account(mut)]
   pub owner: Signer<'info>,
 
-  #[account(has_one = owner,)]
+  #[account(mut, has_one = owner)]
   pub agent: Account<'info, Agent>,
 
   #[account(mut)]
