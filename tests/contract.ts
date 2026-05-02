@@ -28,6 +28,7 @@ import {
     RegisterAgentParams,
     seeds,
     toEncryptionKeyBytes,
+    updateAgentProgramTargetIx,
     updateConfigIx,
     updateMaintenanceIx,
 } from "../sdk";
@@ -525,6 +526,107 @@ describe("contract", () => {
 
             // Only assert the ER reflects the re-activation.
             await waitForErActive(true);
+        });
+
+        // `update_agent_program_target` runs on the ER (the Agent PDA is
+        // delegated there). It adds a new entry to `allowed_targets` if the
+        // target isn't already present, or toggles the `allowed` flag of the
+        // existing entry. Like deactivate/active, it then `commit_accounts`
+        // back to L1 — we only assert ER state and just log the commit sig.
+        const sharedTargetProgram = Keypair.generate().publicKey;
+
+        it("Update Agent Program Target — add new target (ER)", async () => {
+            // Pre-condition: the target is not yet in the agent's whitelist.
+            const beforeOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
+            const beforeMatch = beforeOnEr.allowedTargets.find(
+                (t) => t.target.toBase58() === sharedTargetProgram.toBase58(),
+            );
+            expect(beforeMatch).to.equal(undefined);
+
+            const ix = await updateAgentProgramTargetIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
+                    agent: agentPda,
+                    config: configPda,
+                    magicProgram: MAGIC_PROGRAM_ID,
+                    magicContext: MAGIC_CONTEXT_ID,
+                },
+                params: {
+                    target: {
+                        target: sharedTargetProgram,
+                        allowed: true,
+                    },
+                },
+            });
+
+            const tx = new Transaction().add(ix);
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                tx,
+                [ownerKeypair, agentWalletKeypair],
+                { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
+            );
+            console.log(`Update Agent Program Target (add) txHash (ER): ${txHash}`);
+
+            const commitSig = await GetCommitmentSignature(txHash, ephemeralRollupConnection);
+            console.log(`Commit signature on base chain: ${commitSig}`);
+
+            // Verify the ER agent's allowed_targets now contains the entry
+            // with `allowed = true`.
+            const afterOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
+            const matches = afterOnEr.allowedTargets.filter(
+                (t) => t.target.toBase58() === sharedTargetProgram.toBase58(),
+            );
+            expect(matches.length).to.equal(1);
+            expect(matches[0].allowed).to.equal(true);
+        });
+
+        it("Update Agent Program Target — toggle existing target's allowed flag (ER)", async () => {
+            // Pre-condition: the entry from the previous test exists with allowed = true.
+            const beforeOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
+            const beforeMatches = beforeOnEr.allowedTargets.filter(
+                (t) => t.target.toBase58() === sharedTargetProgram.toBase58(),
+            );
+            expect(beforeMatches.length).to.equal(1);
+            expect(beforeMatches[0].allowed).to.equal(true);
+
+            const ix = await updateAgentProgramTargetIx(program, {
+                accounts: {
+                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
+                    agent: agentPda,
+                    config: configPda,
+                    magicProgram: MAGIC_PROGRAM_ID,
+                    magicContext: MAGIC_CONTEXT_ID,
+                },
+                params: {
+                    target: {
+                        target: sharedTargetProgram,
+                        allowed: false,
+                    },
+                },
+            });
+
+            const tx = new Transaction().add(ix);
+            const txHash = await sendAndConfirmTransaction(
+                ephemeralRollupConnection,
+                tx,
+                [ownerKeypair, agentWalletKeypair],
+                { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
+            );
+            console.log(`Update Agent Program Target (toggle) txHash (ER): ${txHash}`);
+
+            const commitSig = await GetCommitmentSignature(txHash, ephemeralRollupConnection);
+            console.log(`Commit signature on base chain: ${commitSig}`);
+
+            // Verify the existing entry was toggled (NOT duplicated).
+            const afterOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
+            const matches = afterOnEr.allowedTargets.filter(
+                (t) => t.target.toBase58() === sharedTargetProgram.toBase58(),
+            );
+            expect(matches.length).to.equal(1);
+            expect(matches[0].allowed).to.equal(false);
         });
     });
 

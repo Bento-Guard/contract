@@ -37,7 +37,6 @@ pub struct UpdateAgentProgramTarget<'info> {
   #[account(mut)]
   pub owner: Signer<'info>,
 
-  #[account(mut)]
   pub agent_wallet: Signer<'info>,
 
   #[account(
