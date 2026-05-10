@@ -3,6 +3,7 @@ import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { Contract } from "../../target/types/contract";
 
 export interface DeactivateAgentAccounts {
+  relayer: PublicKey;
   owner: PublicKey;
   agent: PublicKey;
   config: PublicKey;
@@ -19,6 +20,7 @@ export const deactivateAgentIx = async (
   return await program.methods
     .deactivateAgent()
     .accountsPartial({
+      relayer: payload.accounts.relayer,
       owner: payload.accounts.owner,
       agent: payload.accounts.agent,
       config: payload.accounts.config,

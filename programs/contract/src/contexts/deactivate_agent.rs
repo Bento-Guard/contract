@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_accounts};
 
 use crate::{
-  common::{constant, event},
+  common::{constant, error::BentoError, event},
   states::{Agent, Config},
 };
 
@@ -16,7 +16,7 @@ pub fn process(ctx: Context<DeactivateAgent>) -> Result<()> {
   agent.deactivate();
 
   commit_accounts(
-    &ctx.accounts.owner,
+    &ctx.accounts.relayer,
     vec![&ctx.accounts.agent.to_account_info()],
     &ctx.accounts.magic_context,
     &ctx.accounts.magic_program,
@@ -32,7 +32,12 @@ pub fn process(ctx: Context<DeactivateAgent>) -> Result<()> {
 #[commit]
 #[derive(Accounts)]
 pub struct DeactivateAgent<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
   #[account(

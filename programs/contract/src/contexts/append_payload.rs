@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-  common::error::BentoError,
-  states::{Action, ActionStatus, Agent},
+  common::{constant, error::BentoError},
+  states::{Action, ActionStatus, Agent, Config},
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -33,7 +33,12 @@ pub fn process(ctx: Context<AppendPayload>, params: AppendPayloadParams) -> Resu
 
 #[derive(Accounts)]
 pub struct AppendPayload<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
   #[account(has_one = owner)]
@@ -41,4 +46,10 @@ pub struct AppendPayload<'info> {
 
   #[account(mut)]
   pub action: AccountLoader<'info, Action>,
+
+  #[account(
+    seeds = [constant::PREFIX_SEED, b"config"],
+    bump = config.bump
+  )]
+  pub config: Account<'info, Config>,
 }

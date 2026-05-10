@@ -3,6 +3,7 @@ import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.j
 import { Contract } from "../../target/types/contract";
 
 export interface RegisterAgentAccounts {
+  relayer: PublicKey;
   owner: PublicKey;
   agentWallet: PublicKey;
   agent: PublicKey;
@@ -25,6 +26,7 @@ export const registerAgentIx = async (
       spendLimit: payload.params.spendLimit,
     })
     .accountsPartial({
+      relayer: payload.accounts.relayer,
       owner: payload.accounts.owner,
       agentWallet: payload.accounts.agentWallet,
       agent: payload.accounts.agent,
