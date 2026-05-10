@@ -431,6 +431,7 @@ describe("contract", () => {
 
             const registerIx = await registerAgentIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
@@ -441,6 +442,7 @@ describe("contract", () => {
 
             const delegateIx = await delegateAgentIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     config: configPda,
@@ -451,9 +453,10 @@ describe("contract", () => {
 
             console.log("Agent PDA: ", agentPda.toBase58());
             const tx = new Transaction().add(registerIx).add(delegateIx);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await provider.sendAndConfirm!(
                 tx,
-                [ownerKeypair, agentWalletKeypair],
+                [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 FINALIZED_OPTS,
             );
             console.log(`Register + Delegate Agent txHash: ${txHash}`);
@@ -491,6 +494,7 @@ describe("contract", () => {
 
             const ix = await deactivateAgentIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     config: configPda,
@@ -500,10 +504,11 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 tx,
-                [ownerKeypair],
+                [relayerKeypair, ownerKeypair],
                 { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
             );
             console.log(`Deactivate Agent txHash (ER): ${txHash}`);
@@ -523,6 +528,7 @@ describe("contract", () => {
 
             const ix = await activeAgentIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     config: configPda,
@@ -532,10 +538,11 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 tx,
-                [ownerKeypair],
+                [relayerKeypair, ownerKeypair],
                 { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
             );
             console.log(`Active Agent txHash (ER): ${txHash}`);
@@ -564,6 +571,7 @@ describe("contract", () => {
 
             const ix = await updateAgentProgramTargetIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
@@ -580,10 +588,11 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 tx,
-                [ownerKeypair, agentWalletKeypair],
+                [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
             );
             console.log(`Update Agent Program Target (add) txHash (ER): ${txHash}`);
@@ -612,6 +621,7 @@ describe("contract", () => {
 
             const ix = await updateAgentProgramTargetIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
@@ -628,10 +638,11 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 tx,
-                [ownerKeypair, agentWalletKeypair],
+                [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 { skipPreflight: true, commitment: "finalized", preflightCommitment: "finalized" },
             );
             console.log(`Update Agent Program Target (toggle) txHash (ER): ${txHash}`);
@@ -736,6 +747,7 @@ describe("contract", () => {
         it("init_action (L1) + delegate_action (L1) — create Action PDA and push to ER", async () => {
             const initIx = await initActionIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
@@ -752,6 +764,7 @@ describe("contract", () => {
 
             const delegateIx = await delegateActionIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     action: actionPda,
@@ -762,9 +775,10 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(initIx).add(delegateIx);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await provider.sendAndConfirm!(
                 tx,
-                [ownerKeypair, agentWalletKeypair],
+                [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 FINALIZED_OPTS,
             );
             console.log(`Init + Delegate Action txHash: ${txHash}`);
@@ -805,18 +819,21 @@ describe("contract", () => {
             for (const c of chunks) {
                 const ix = await appendPayloadIx(program, {
                     accounts: {
+                        relayer: relayerKeypair.publicKey,
                         owner: ownerKeypair.publicKey,
                         agent: agentPda,
                         action: actionPda,
+                        config: configPda,
                     },
                     params: { offset: c.offset, chunk: c.chunk },
                 });
 
                 const tx = new Transaction().add(ix);
+                tx.feePayer = relayerKeypair.publicKey;
                 const sig = await sendAndConfirmTransaction(
                     ephemeralRollupConnection,
                     tx,
-                    [ownerKeypair],
+                    [relayerKeypair, ownerKeypair],
                     {
                         skipPreflight: true,
                         commitment: "finalized",
@@ -836,9 +853,11 @@ describe("contract", () => {
         it("finalize_action_building (ER) — store commitment, status → Pending, commit Action+Agent to L1", async () => {
             const ix = await finalizeActionBuildingIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     action: actionPda,
+                    config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
                 },
@@ -846,10 +865,11 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
+            tx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 tx,
-                [ownerKeypair],
+                [relayerKeypair, ownerKeypair],
                 {
                     skipPreflight: true,
                     commitment: "finalized",
@@ -974,6 +994,7 @@ describe("contract", () => {
 
             const initIx = await initActionIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
@@ -989,6 +1010,7 @@ describe("contract", () => {
             });
             const delIx = await delegateActionIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     action: pda,
@@ -997,9 +1019,11 @@ describe("contract", () => {
                 },
                 validator: validatorAccount,
             });
+            const initDelTx = new Transaction().add(initIx).add(delIx);
+            initDelTx.feePayer = relayerKeypair.publicKey;
             await provider.sendAndConfirm!(
-                new Transaction().add(initIx).add(delIx),
-                [ownerKeypair, agentWalletKeypair],
+                initDelTx,
+                [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 FINALIZED_OPTS,
             );
 
@@ -1015,16 +1039,20 @@ describe("contract", () => {
             for (const c of chunkAppendPayload(enc.payload, { chunkSize: CHUNK_SIZE })) {
                 const apIx = await appendPayloadIx(program, {
                     accounts: {
+                        relayer: relayerKeypair.publicKey,
                         owner: ownerKeypair.publicKey,
                         agent: agentPda,
                         action: pda,
+                        config: configPda,
                     },
                     params: { offset: c.offset, chunk: c.chunk },
                 });
+                const apTx = new Transaction().add(apIx);
+                apTx.feePayer = relayerKeypair.publicKey;
                 await sendAndConfirmTransaction(
                     ephemeralRollupConnection,
-                    new Transaction().add(apIx),
-                    [ownerKeypair],
+                    apTx,
+                    [relayerKeypair, ownerKeypair],
                     {
                         skipPreflight: true,
                         commitment: "finalized",
@@ -1035,18 +1063,22 @@ describe("contract", () => {
 
             const finIx = await finalizeActionBuildingIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     action: pda,
+                    config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
                 },
                 params: { commitmentHash: commit },
             });
+            const finTx = new Transaction().add(finIx);
+            finTx.feePayer = relayerKeypair.publicKey;
             await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
-                new Transaction().add(finIx),
-                [ownerKeypair],
+                finTx,
+                [relayerKeypair, ownerKeypair],
                 {
                     skipPreflight: true,
                     commitment: "finalized",
@@ -1107,15 +1139,19 @@ describe("contract", () => {
         it("approve_action (ER) — owner approves the escalated action_id=1", async () => {
             const ix = await approveActionIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     action: actionPda,
+                    config: configPda,
                 },
             });
+            const apTx = new Transaction().add(ix);
+            apTx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
-                new Transaction().add(ix),
-                [ownerKeypair],
+                apTx,
+                [relayerKeypair, ownerKeypair],
                 {
                     skipPreflight: true,
                     commitment: "finalized",
@@ -1270,15 +1306,19 @@ describe("contract", () => {
             // Step 4b: owner rejects.
             const rejectIx = await rejectActionIx(program, {
                 accounts: {
+                    relayer: relayerKeypair.publicKey,
                     owner: ownerKeypair.publicKey,
                     agent: agentPda,
                     action: pda,
+                    config: configPda,
                 },
             });
+            const rejTx = new Transaction().add(rejectIx);
+            rejTx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
-                new Transaction().add(rejectIx),
-                [ownerKeypair],
+                rejTx,
+                [relayerKeypair, ownerKeypair],
                 {
                     skipPreflight: true,
                     commitment: "finalized",

@@ -9,6 +9,7 @@ import {
 } from "@magicblock-labs/ephemeral-rollups-sdk";
 
 export interface DelegateAgentAccounts {
+    relayer: PublicKey;
     owner: PublicKey;
     agent: PublicKey;
     config: PublicKey;
@@ -36,6 +37,7 @@ export const delegateAgentIx = async (
     return await program.methods
         .delegateAgent()
         .accountsPartial({
+            relayer: payload.accounts.relayer,
             owner: payload.accounts.owner,
             agent: payload.accounts.agent,
             config: payload.accounts.config,

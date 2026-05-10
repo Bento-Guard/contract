@@ -4,6 +4,7 @@ import { Contract } from "../../target/types/contract";
 import { AllowedTarget } from "../types";
 
 export interface UpdateAgentProgramTargetAccounts {
+  relayer: PublicKey;
   owner: PublicKey;
   agentWallet: PublicKey;
   agent: PublicKey;
@@ -29,6 +30,7 @@ export const updateAgentProgramTargetIx = async (
       allowed: payload.params.target.allowed,
     })
     .accountsPartial({
+      relayer: payload.accounts.relayer,
       owner: payload.accounts.owner,
       agentWallet: payload.accounts.agentWallet,
       agent: payload.accounts.agent,

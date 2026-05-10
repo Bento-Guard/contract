@@ -24,7 +24,7 @@ pub fn process(ctx: Context<DelegateAgent>) -> Result<()> {
   };
 
   ctx.accounts.delegate_agent(
-    &ctx.accounts.owner,
+    &ctx.accounts.relayer,
     &[constant::PREFIX_SEED, b"agent", agent_wallet.as_ref()],
     DelegateConfig {
       validator: ctx.remaining_accounts.first().map(|acc| acc.key()),
@@ -38,7 +38,12 @@ pub fn process(ctx: Context<DelegateAgent>) -> Result<()> {
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegateAgent<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
   /// CHECK: Agent PDA being delegated. Owner verified inside the handler.

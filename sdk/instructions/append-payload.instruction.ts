@@ -3,9 +3,11 @@ import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { Contract } from "../../target/types/contract";
 
 export interface AppendPayloadAccounts {
+  relayer: PublicKey;
   owner: PublicKey;
   agent: PublicKey;
   action: PublicKey;
+  config: PublicKey;
 }
 
 export interface AppendPayloadParams {
@@ -74,9 +76,11 @@ export const appendPayloadIx = async (
       chunk: payload.params.chunk,
     })
     .accountsPartial({
+      relayer: payload.accounts.relayer,
       owner: payload.accounts.owner,
       agent: payload.accounts.agent,
       action: payload.accounts.action,
+      config: payload.accounts.config,
     })
     .instruction();
 };

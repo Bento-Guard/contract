@@ -57,7 +57,12 @@ pub fn process(ctx: Context<InitAction>, params: InitActionParams) -> Result<()>
 #[derive(Accounts)]
 #[instruction(params: InitActionParams)]
 pub struct InitAction<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
   pub agent_wallet: Signer<'info>,
@@ -71,7 +76,7 @@ pub struct InitAction<'info> {
 
   #[account(
     init,
-    payer = owner,
+    payer = relayer,
     space = Action::space(),
     seeds = [
       constant::PREFIX_SEED,

@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_accounts};
 
 use crate::{
-  common::constant,
+  common::{constant, error::BentoError},
   states::{Agent, AllowedTarget, Config},
 };
 
@@ -22,7 +22,7 @@ pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTar
   }
 
   commit_accounts(
-    &ctx.accounts.owner,
+    &ctx.accounts.relayer,
     vec![&ctx.accounts.agent.to_account_info()],
     &ctx.accounts.magic_context,
     &ctx.accounts.magic_program,
@@ -34,7 +34,12 @@ pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTar
 #[commit]
 #[derive(Accounts)]
 pub struct UpdateAgentProgramTarget<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
   pub agent_wallet: Signer<'info>,

@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-  common::{constant, event},
+  common::{constant, error::BentoError, event},
   states::{Agent, Config},
 };
 
@@ -38,15 +38,19 @@ pub fn process(ctx: Context<RegisterAgent>, params: RegisterAgentParams) -> Resu
 
 #[derive(Accounts)]
 pub struct RegisterAgent<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
-  #[account(mut)]
   pub agent_wallet: Signer<'info>,
 
   #[account(
     init,
-    payer = owner,
+    payer = relayer,
     space = Agent::space(),
     seeds = [constant::PREFIX_SEED, b"agent", agent_wallet.key().as_ref()],
     bump

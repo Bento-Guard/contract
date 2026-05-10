@@ -19,7 +19,7 @@ pub fn process(ctx: Context<ActiveAgent>) -> Result<()> {
   agent.activate();
 
   commit_accounts(
-    &ctx.accounts.owner,
+    &ctx.accounts.relayer,
     vec![&ctx.accounts.agent.to_account_info()],
     &ctx.accounts.magic_context,
     &ctx.accounts.magic_program,
@@ -35,7 +35,12 @@ pub fn process(ctx: Context<ActiveAgent>) -> Result<()> {
 #[commit]
 #[derive(Accounts)]
 pub struct ActiveAgent<'info> {
-  #[account(mut)]
+  #[account(
+    mut,
+    constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
+  )]
+  pub relayer: Signer<'info>,
+
   pub owner: Signer<'info>,
 
   #[account(
