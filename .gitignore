@@ -9,3 +9,5 @@ test-ledger
 .env
 
 magicblock-test-storage/**
+
+accounts/**
