@@ -10,6 +10,12 @@ export interface FinalizeActionBuildingAccounts {
   config: PublicKey;
   magicProgram: PublicKey;
   magicContext: PublicKey;
+  /**
+   * Canonical magic fee vault PDA. Derive with `deriveMagicFeeVault` against
+   * a base-layer connection — its lamports are debited to pay for the commit,
+   * lifting the 10-commit sponsorship cap on the Agent and Action PDAs.
+   */
+  magicFeeVault: PublicKey;
 }
 
 export interface FinalizeActionBuildingParams {
@@ -33,6 +39,7 @@ export const finalizeActionBuildingIx = async (
       config: payload.accounts.config,
       magicProgram: payload.accounts.magicProgram,
       magicContext: payload.accounts.magicContext,
+      magicFeeVault: payload.accounts.magicFeeVault,
     })
     .instruction();
 };

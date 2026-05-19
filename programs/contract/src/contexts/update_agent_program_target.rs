@@ -1,5 +1,8 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_accounts};
+use ephemeral_rollups_sdk::{
+  anchor::commit,
+  ephem::{FoldableIntentBuilder, MagicIntentBundleBuilder},
+};
 
 use crate::{
   common::{constant, error::BentoError},
@@ -21,12 +24,14 @@ pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTar
     agent.add_program_allowed_target(target_update.target)?;
   }
 
-  commit_accounts(
-    &ctx.accounts.relayer,
-    vec![&ctx.accounts.agent.to_account_info()],
-    &ctx.accounts.magic_context,
-    &ctx.accounts.magic_program,
-  )?;
+  MagicIntentBundleBuilder::new(
+    ctx.accounts.relayer.to_account_info(),
+    ctx.accounts.magic_context.to_account_info(),
+    ctx.accounts.magic_program.to_account_info(),
+  )
+  .magic_fee_vault(ctx.accounts.magic_fee_vault.to_account_info())
+  .commit(&[ctx.accounts.agent.to_account_info()])
+  .build_and_invoke()?;
 
   Ok(())
 }
@@ -56,4 +61,8 @@ pub struct UpdateAgentProgramTarget<'info> {
     bump = config.bump
   )]
   pub config: Account<'info, Config>,
+
+  /// CHECK: Magic fee vault PDA. Lifts the 10-commit sponsorship cap. Validated by the ER SDK.
+  #[account(mut)]
+  pub magic_fee_vault: AccountInfo<'info>,
 }

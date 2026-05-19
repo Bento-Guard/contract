@@ -46,7 +46,7 @@ pub struct RegisterAgent<'info> {
 
   pub owner: Signer<'info>,
 
-  pub agent_wallet: Signer<'info>,
+  pub agent_wallet: SystemAccount<'info>,
 
   #[account(
     init,

@@ -9,6 +9,8 @@ export interface DeactivateAgentAccounts {
   config: PublicKey;
   magicProgram: PublicKey;
   magicContext: PublicKey;
+  /** Canonical magic fee vault PDA — derive with `deriveMagicFeeVault`. */
+  magicFeeVault: PublicKey;
 }
 
 export const deactivateAgentIx = async (
@@ -26,6 +28,7 @@ export const deactivateAgentIx = async (
       config: payload.accounts.config,
       magicProgram: payload.accounts.magicProgram,
       magicContext: payload.accounts.magicContext,
+      magicFeeVault: payload.accounts.magicFeeVault,
     })
     .instruction();
 };

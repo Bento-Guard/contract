@@ -1,5 +1,8 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::{anchor::commit, ephem::commit_accounts};
+use ephemeral_rollups_sdk::{
+  anchor::commit,
+  ephem::{FoldableIntentBuilder, MagicIntentBundleBuilder},
+};
 
 use crate::{
   common::{constant, error::BentoError, event},
@@ -23,15 +26,17 @@ pub fn process(ctx: Context<FinalizeActionBuilding>, commitment_hash: [u8; 32]) 
     agent: agent_key,
   });
 
-  commit_accounts(
-    &ctx.accounts.relayer,
-    vec![
-      &ctx.accounts.action.to_account_info(),
-      &ctx.accounts.agent.to_account_info(), // sync latest total action agent from ER to main chain
-    ],
-    &ctx.accounts.magic_context,
-    &ctx.accounts.magic_program,
-  )?;
+  MagicIntentBundleBuilder::new(
+    ctx.accounts.relayer.to_account_info(),
+    ctx.accounts.magic_context.to_account_info(),
+    ctx.accounts.magic_program.to_account_info(),
+  )
+  .magic_fee_vault(ctx.accounts.magic_fee_vault.to_account_info())
+  .commit(&[
+    ctx.accounts.action.to_account_info(),
+    ctx.accounts.agent.to_account_info(),
+  ])
+  .build_and_invoke()?;
 
   Ok(())
 }
@@ -58,4 +63,10 @@ pub struct FinalizeActionBuilding<'info> {
     bump = config.bump
   )]
   pub config: Account<'info, Config>,
+
+  /// CHECK: Magic fee vault PDA derived from `[b"magic-fee-vault", validator]`
+  /// under the ephemeral-rollups SDK program. Lifts the 10-commit sponsorship cap.
+  /// The ER program validates this PDA against the delegation record.
+  #[account(mut)]
+  pub magic_fee_vault: AccountInfo<'info>,
 }

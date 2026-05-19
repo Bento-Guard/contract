@@ -43,6 +43,12 @@
       "skillPath": "skills/git-commit/SKILL.md",
       "computedHash": "3c29bdb928d342242dff10ac5ec8fe3896e7c32387c838961e9de29d1f6d12f4"
     },
+    "magicblock": {
+      "source": "magicblock-labs/magicblock-dev-skill",
+      "sourceType": "github",
+      "skillPath": "skill/SKILL.md",
+      "computedHash": "9daf522b00e45d1548447cab81ae2ee4f1599fdfb8ec217b0c4078db913e09d0"
+    },
     "quick-implement": {
       "source": "buiducnhat/agent-skills",
       "sourceType": "github",

@@ -24,7 +24,7 @@ staging = []
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 bytemuck = { version = "1.20.0", features = ["min_const_generics"] }
-ephemeral-rollups-sdk = { version = "0.6.5", features = ["anchor", "disable-realloc"] }
+ephemeral-rollups-sdk = { version = "0.11.2", features = ["anchor", "disable-realloc"] }
 cfg-if = "1.0.0"
 
 

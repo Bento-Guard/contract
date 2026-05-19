@@ -7,6 +7,12 @@ export interface VerdictActionAccounts {
   agent: PublicKey;
   action: PublicKey;
   config: PublicKey;
+  /**
+   * Canonical magic fee vault PDA — derive with `deriveMagicFeeVault`.
+   * Lifts the 10-commit sponsorship cap so the relayer can keep submitting
+   * verdicts on long-lived Agent PDAs without re-delegating.
+   */
+  magicFeeVault: PublicKey;
 }
 
 export interface VerdictActionParams {
@@ -31,6 +37,7 @@ export const verdictActionIx = async (
       agent: payload.accounts.agent,
       action: payload.accounts.action,
       config: payload.accounts.config,
+      magicFeeVault: payload.accounts.magicFeeVault,
     })
     .instruction();
 };
