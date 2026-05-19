@@ -798,7 +798,6 @@ describe("contract", () => {
             const initIx = await initActionIx(program, {
                 accounts: {
                     relayer: relayerKeypair.publicKey,
-                    owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
                     action: actionPda,
@@ -870,7 +869,7 @@ describe("contract", () => {
                 const ix = await appendPayloadIx(program, {
                     accounts: {
                         relayer: relayerKeypair.publicKey,
-                        owner: ownerKeypair.publicKey,
+                        agentWallet: agentWalletKeypair.publicKey,
                         agent: agentPda,
                         action: actionPda,
                         config: configPda,
@@ -883,7 +882,7 @@ describe("contract", () => {
                 const sig = await sendAndConfirmTransaction(
                     ephemeralRollupConnection,
                     tx,
-                    [relayerKeypair, ownerKeypair],
+                    [relayerKeypair, agentWalletKeypair],
                     {
                         skipPreflight: true,
                         commitment: "finalized",
@@ -904,7 +903,7 @@ describe("contract", () => {
             const ix = await finalizeActionBuildingIx(program, {
                 accounts: {
                     relayer: relayerKeypair.publicKey,
-                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
                     action: actionPda,
                     config: configPda,
@@ -920,7 +919,7 @@ describe("contract", () => {
             const txHash = await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 tx,
-                [relayerKeypair, ownerKeypair],
+                [relayerKeypair, agentWalletKeypair],
                 {
                     skipPreflight: true,
                     commitment: "finalized",
@@ -1046,7 +1045,6 @@ describe("contract", () => {
             const initIx = await initActionIx(program, {
                 accounts: {
                     relayer: relayerKeypair.publicKey,
-                    owner: ownerKeypair.publicKey,
                     agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
                     action: pda,
@@ -1091,7 +1089,7 @@ describe("contract", () => {
                 const apIx = await appendPayloadIx(program, {
                     accounts: {
                         relayer: relayerKeypair.publicKey,
-                        owner: ownerKeypair.publicKey,
+                        agentWallet: agentWalletKeypair.publicKey,
                         agent: agentPda,
                         action: pda,
                         config: configPda,
@@ -1103,7 +1101,7 @@ describe("contract", () => {
                 await sendAndConfirmTransaction(
                     ephemeralRollupConnection,
                     apTx,
-                    [relayerKeypair, ownerKeypair],
+                    [relayerKeypair, agentWalletKeypair],
                     {
                         skipPreflight: true,
                         commitment: "finalized",
@@ -1115,7 +1113,7 @@ describe("contract", () => {
             const finIx = await finalizeActionBuildingIx(program, {
                 accounts: {
                     relayer: relayerKeypair.publicKey,
-                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
                     action: pda,
                     config: configPda,
@@ -1130,7 +1128,7 @@ describe("contract", () => {
             await sendAndConfirmTransaction(
                 ephemeralRollupConnection,
                 finTx,
-                [relayerKeypair, ownerKeypair],
+                [relayerKeypair, agentWalletKeypair],
                 {
                     skipPreflight: true,
                     commitment: "finalized",

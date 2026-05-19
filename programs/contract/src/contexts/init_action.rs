@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::{
   common::{constant, error::BentoError, event},
-  states::{Action, Agent, Config, MAX_PAYLOAD},
+  states::{Action, Config, MAX_PAYLOAD},
 };
 
 #[derive(AnchorDeserialize, AnchorSerialize)]
@@ -23,15 +23,6 @@ pub fn process(ctx: Context<InitAction>, params: InitActionParams) -> Result<()>
     params.total_data_len <= MAX_PAYLOAD as u32,
     BentoError::PayloadTooLarge
   );
-
-  // Verify agent structure and owner
-  {
-    let agent_data = ctx.accounts.agent.try_borrow_data()?;
-    let agent = Agent::try_deserialize(&mut &agent_data[..])?;
-    if agent.owner != ctx.accounts.owner.key() {
-      return err!(BentoError::InvalidAgentOwner);
-    }
-  }
 
   let action = &mut ctx.accounts.action.load_init()?;
 
@@ -62,8 +53,6 @@ pub struct InitAction<'info> {
     constraint = relayer.key() == config.relayer @ BentoError::InvalidRelayer
   )]
   pub relayer: Signer<'info>,
-
-  pub owner: Signer<'info>,
 
   pub agent_wallet: Signer<'info>,
 

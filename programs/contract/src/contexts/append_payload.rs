@@ -39,9 +39,9 @@ pub struct AppendPayload<'info> {
   )]
   pub relayer: Signer<'info>,
 
-  pub owner: Signer<'info>,
+  pub agent_wallet: Signer<'info>,
 
-  #[account(has_one = owner)]
+  #[account(has_one = agent_wallet)]
   pub agent: Account<'info, Agent>,
 
   #[account(mut)]

@@ -4,7 +4,7 @@ import { Contract } from "../../target/types/contract";
 
 export interface FinalizeActionBuildingAccounts {
   relayer: PublicKey;
-  owner: PublicKey;
+  agentWallet: PublicKey;
   agent: PublicKey;
   action: PublicKey;
   config: PublicKey;
@@ -33,7 +33,7 @@ export const finalizeActionBuildingIx = async (
     .finalizeActionBuilding(payload.params.commitmentHash)
     .accountsPartial({
       relayer: payload.accounts.relayer,
-      owner: payload.accounts.owner,
+      agentWallet: payload.accounts.agentWallet,
       agent: payload.accounts.agent,
       action: payload.accounts.action,
       config: payload.accounts.config,

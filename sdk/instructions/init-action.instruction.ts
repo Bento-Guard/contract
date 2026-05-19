@@ -8,7 +8,6 @@ import { Contract } from "../../target/types/contract";
 
 export interface InitActionAccounts {
   relayer: PublicKey;
-  owner: PublicKey;
   agentWallet: PublicKey;
   agent: PublicKey;
   action: PublicKey;
@@ -38,7 +37,6 @@ export const initActionIx = async (
     })
     .accountsPartial({
       relayer: payload.accounts.relayer,
-      owner: payload.accounts.owner,
       agentWallet: payload.accounts.agentWallet,
       agent: payload.accounts.agent,
       action: payload.accounts.action,
