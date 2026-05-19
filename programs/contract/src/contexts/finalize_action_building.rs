@@ -50,9 +50,9 @@ pub struct FinalizeActionBuilding<'info> {
   )]
   pub relayer: Signer<'info>,
 
-  pub owner: Signer<'info>,
+  pub agent_wallet: Signer<'info>,
 
-  #[account(mut, has_one = owner)]
+  #[account(mut, has_one = agent_wallet)]
   pub agent: Account<'info, Agent>,
 
   #[account(mut)]
