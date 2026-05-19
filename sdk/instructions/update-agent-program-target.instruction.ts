@@ -11,6 +11,8 @@ export interface UpdateAgentProgramTargetAccounts {
   config: PublicKey;
   magicProgram: PublicKey;
   magicContext: PublicKey;
+  /** Canonical magic fee vault PDA — derive with `deriveMagicFeeVault`. */
+  magicFeeVault: PublicKey;
 }
 
 export interface UpdateAgentProgramTargetParams {
@@ -37,6 +39,7 @@ export const updateAgentProgramTargetIx = async (
       config: payload.accounts.config,
       magicProgram: payload.accounts.magicProgram,
       magicContext: payload.accounts.magicContext,
+      magicFeeVault: payload.accounts.magicFeeVault,
     })
     .instruction();
 };

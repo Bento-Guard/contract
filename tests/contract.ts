@@ -34,6 +34,7 @@ import {
     decryptFromAgent,
     delegateActionIx,
     delegateAgentIx,
+    deriveMagicFeeVault,
     encodeActionPayload,
     encryptForRelayer,
     finalizeActionBuildingIx,
@@ -116,6 +117,51 @@ describe("contract", () => {
         program.programId,
     );
 
+    // `provider.sendAndConfirm` always partialSigns with the AnchorProvider's
+    // wallet keypair (~/.config/solana/id.json on localnet), which throws
+    // "unknown signer" whenever the feePayer differs from that wallet — which
+    // is always the case here, because the tests use the bundled relayer /
+    // operator keypairs from tests/accounts. Use this helper instead: it
+    // signs only with the keypairs we explicitly provide.
+    const sendL1 = (
+        tx: Transaction,
+        signers: Keypair[],
+        opts: anchor.web3.ConfirmOptions = FINALIZED_OPTS,
+    ) => {
+        if (!tx.feePayer && signers.length > 0) tx.feePayer = signers[0].publicKey;
+        return sendAndConfirmTransaction(connection, tx, signers, {
+            commitment: opts.commitment,
+            preflightCommitment: opts.preflightCommitment,
+        });
+    };
+
+    // The canonical `magic_fee_vault` PDA is derived from the validator that
+    // owns the delegation record of any delegated account. We read it lazily
+    // after register_agent + delegate_agent succeed, and reuse it for every
+    // subsequent commit handler. The same vault is shared by all accounts
+    // delegated to the same validator.
+    let magicFeeVault: PublicKey | undefined;
+    const ensureMagicFeeVault = async (): Promise<PublicKey> => {
+        if (magicFeeVault) return magicFeeVault;
+        const { magicFeeVault: pda } = await deriveMagicFeeVault(connection, agentPda);
+        magicFeeVault = pda;
+        // Fund the vault so commits have lamports to debit. Cheap on localnet,
+        // ~harmless on devnet — re-runs of the test top up incrementally.
+        // 0.05 SOL covers ~1000 commits at typical per-commit lamport cost; we
+        // intentionally keep this well below the 0.1 SOL per-test airdrop so
+        // the relayer still has room to pay its own ER transaction fees.
+        const fundIx = SystemProgram.transfer({
+            fromPubkey: relayerKeypair.publicKey,
+            toPubkey: pda,
+            lamports: 0.05 * LAMPORTS_PER_SOL,
+        });
+        await sendAndConfirmTransaction(connection, new Transaction().add(fundIx), [
+            relayerKeypair,
+        ]);
+        console.log(`Funded magic_fee_vault ${pda.toBase58()} with 0.05 SOL`);
+        return pda;
+    };
+
     console.log("\n========================================");
     console.log("           Accounts loaded");
     console.log("========================================");
@@ -172,7 +218,7 @@ describe("contract", () => {
         throw new Error(`Timed out waiting for ER agent.active === ${expected} (ER=${last})`);
     };
 
-    xdescribe("Initialization Config", () => {
+    describe("Initialization Config", () => {
         it("Success initialize config", async () => {
             const initializeConfigParams: InitializeParams = {
                 relayer: relayerKeypair.publicKey,
@@ -193,7 +239,7 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
-            const signature = await provider.sendAndConfirm!(tx, [operatorKeypair]);
+            const signature = await sendL1(tx, [operatorKeypair]);
             console.log(`  Initialize tx signature: ${signature}`);
 
             const config = await program.account.config.fetch(configPda);
@@ -236,7 +282,7 @@ describe("contract", () => {
             });
 
             const tx = new Transaction().add(ix);
-            await provider.sendAndConfirm!(tx, [operatorKeypair]);
+            await sendL1(tx, [operatorKeypair]);
 
             const after = await program.account.config.fetch(configPda);
             expect(after.escalateThreshold).to.equal(newEscalate);
@@ -268,7 +314,7 @@ describe("contract", () => {
                 },
             });
 
-            await provider.sendAndConfirm!(new Transaction().add(ix), [operatorKeypair]);
+            await sendL1(new Transaction().add(ix), [operatorKeypair]);
 
             const after = await program.account.config.fetch(configPda);
             expect(after.relayer.toBase58()).to.equal(newRelayer.publicKey.toBase58());
@@ -292,7 +338,7 @@ describe("contract", () => {
                     emaScale: null,
                 },
             });
-            await provider.sendAndConfirm!(new Transaction().add(restoreIx), [operatorKeypair]);
+            await sendL1(new Transaction().add(restoreIx), [operatorKeypair]);
         });
 
         it("Updates every field in a single call", async () => {
@@ -313,7 +359,7 @@ describe("contract", () => {
                 },
                 params,
             });
-            await provider.sendAndConfirm!(new Transaction().add(ix), [operatorKeypair]);
+            await sendL1(new Transaction().add(ix), [operatorKeypair]);
 
             const after = await program.account.config.fetch(configPda);
             expect(after.relayer.toBase58()).to.equal(params.relayer.toBase58());
@@ -352,7 +398,7 @@ describe("contract", () => {
             });
 
             try {
-                await provider.sendAndConfirm!(new Transaction().add(ix), [intruder]);
+                await sendL1(new Transaction().add(ix), [intruder]);
                 expect.fail("update_config should have failed for a non-operator signer");
             } catch (err: any) {
                 expect(String(err)).to.match(/InvalidOperator|0x1771|constraint/i);
@@ -369,7 +415,7 @@ describe("contract", () => {
                 },
                 params: { maintenance: true },
             });
-            await provider.sendAndConfirm!(new Transaction().add(ix), [operatorKeypair]);
+            await sendL1(new Transaction().add(ix), [operatorKeypair]);
 
             const config = await program.account.config.fetch(configPda);
             expect(config.maintenance).to.equal(true);
@@ -383,7 +429,7 @@ describe("contract", () => {
                 },
                 params: { maintenance: false },
             });
-            await provider.sendAndConfirm!(new Transaction().add(ix), [operatorKeypair]);
+            await sendL1(new Transaction().add(ix), [operatorKeypair]);
 
             const config = await program.account.config.fetch(configPda);
             expect(config.maintenance).to.equal(false);
@@ -406,7 +452,7 @@ describe("contract", () => {
             });
 
             try {
-                await provider.sendAndConfirm!(new Transaction().add(ix), [intruder]);
+                await sendL1(new Transaction().add(ix), [intruder]);
                 expect.fail("update_maintenance should have failed for a non-operator signer");
             } catch (err: any) {
                 expect(String(err)).to.match(/constraint|0x|InvalidOperator/i);
@@ -454,9 +500,9 @@ describe("contract", () => {
             console.log("Agent PDA: ", agentPda.toBase58());
             const tx = new Transaction().add(registerIx).add(delegateIx);
             tx.feePayer = relayerKeypair.publicKey;
-            const txHash = await provider.sendAndConfirm!(
+            const txHash = await sendL1(
                 tx,
-                [relayerKeypair, ownerKeypair, agentWalletKeypair],
+                [relayerKeypair, ownerKeypair],
                 FINALIZED_OPTS,
             );
             console.log(`Register + Delegate Agent txHash: ${txHash}`);
@@ -500,6 +546,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
             });
 
@@ -534,6 +581,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
             });
 
@@ -578,6 +626,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
                     target: {
@@ -628,6 +677,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
                     target: {
@@ -776,7 +826,7 @@ describe("contract", () => {
 
             const tx = new Transaction().add(initIx).add(delegateIx);
             tx.feePayer = relayerKeypair.publicKey;
-            const txHash = await provider.sendAndConfirm!(
+            const txHash = await sendL1(
                 tx,
                 [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 FINALIZED_OPTS,
@@ -860,6 +910,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { commitmentHash: commitment },
             });
@@ -1021,7 +1072,7 @@ describe("contract", () => {
             });
             const initDelTx = new Transaction().add(initIx).add(delIx);
             initDelTx.feePayer = relayerKeypair.publicKey;
-            await provider.sendAndConfirm!(
+            await sendL1(
                 initDelTx,
                 [relayerKeypair, ownerKeypair, agentWalletKeypair],
                 FINALIZED_OPTS,
@@ -1070,6 +1121,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { commitmentHash: commit },
             });
@@ -1105,6 +1157,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: actionPda,
                     config: configPda,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { rawScore, reasoningHash },
             });
@@ -1188,6 +1241,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { rawScore, reasoningHash },
             });
@@ -1237,6 +1291,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { rawScore, reasoningHash },
             });
@@ -1281,6 +1336,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
                     rawScore: 60_000,
@@ -1350,6 +1406,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
                     rawScore: 10_000,
@@ -1370,7 +1427,11 @@ describe("contract", () => {
                 );
                 expect.fail("verdict_action should have failed for a non-relayer signer");
             } catch (err: any) {
-                expect(String(err)).to.match(/InvalidRelayer|constraint|0x/i);
+                // With `skipPreflight: true`, the SendTransactionError swallows the
+                // program log; we just confirm the tx didn't land successfully.
+                expect(String(err)).to.match(
+                    /InvalidRelayer|constraint|0x|resulted in an error|Status/i,
+                );
             }
 
             // Action stayed Pending — verdict never landed.
