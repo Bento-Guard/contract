@@ -15,8 +15,8 @@ pub fn process(ctx: Context<DelegateAction>) -> Result<()> {
   {
     let agent_data = ctx.accounts.agent.try_borrow_data()?;
     let agent = Agent::try_deserialize(&mut &agent_data[..])?;
-    if agent.owner != ctx.accounts.owner.key() {
-      return err!(BentoError::InvalidAgentOwner);
+    if agent.agent_wallet != ctx.accounts.agent_wallet.key() {
+      return err!(BentoError::InvalidAgentWallet);
     }
   }
 
@@ -67,7 +67,7 @@ pub struct DelegateAction<'info> {
   )]
   pub relayer: Signer<'info>,
 
-  pub owner: Signer<'info>,
+  pub agent_wallet: Signer<'info>,
 
   /// CHECK: Agent PDA delegated. Owner verified inside the handler.
   pub agent: AccountInfo<'info>,
