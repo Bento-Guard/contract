@@ -40,4 +40,7 @@ pub enum BentoError {
 
   #[msg("Invalid agent owner")]
   InvalidAgentOwner,
+
+  #[msg("Invalid agent wallet")]
+  InvalidAgentWallet,
 }

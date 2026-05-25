@@ -814,7 +814,7 @@ describe("contract", () => {
             const delegateIx = await delegateActionIx(program, {
                 accounts: {
                     relayer: relayerKeypair.publicKey,
-                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
                     action: actionPda,
                     config: configPda,
@@ -827,7 +827,7 @@ describe("contract", () => {
             tx.feePayer = relayerKeypair.publicKey;
             const txHash = await sendL1(
                 tx,
-                [relayerKeypair, ownerKeypair, agentWalletKeypair],
+                [relayerKeypair, agentWalletKeypair],
                 FINALIZED_OPTS,
             );
             console.log(`Init + Delegate Action txHash: ${txHash}`);
