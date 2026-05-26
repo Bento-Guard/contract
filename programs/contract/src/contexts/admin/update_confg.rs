@@ -5,7 +5,7 @@ use crate::{
   states::Config,
 };
 
-#[derive(AnchorSerialize, AnchorDeserialize)]
+#[derive(AnchorSerialize, AnchorDeserialize, Debug)]
 pub struct UpdateConfigParams {
   pub relayer: Option<Pubkey>,
   pub relayer_encryption_key: Option<[u8; 32]>,
