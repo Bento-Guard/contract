@@ -8,6 +8,7 @@ mod contexts;
 use contexts::*;
 mod states;
 use states::*;
+mod utils;
 
 declare_id!(PROGRAM_ID);
 

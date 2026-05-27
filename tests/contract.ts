@@ -1,5 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
+import * as crypto from "crypto";
 import { expect } from "chai";
 import { Contract } from "../target/types/contract";
 import { OPERATOR_KEYPAIR, OWNER_AGENT_KEYPAIR, RELAYER_KEYPAIR } from "./accounts";
@@ -17,6 +18,7 @@ import {
 } from "@solana/web3.js";
 import {
     GetCommitmentSignature,
+    lamportsDelegatedTransferIx,
     MAGIC_CONTEXT_ID,
     MAGIC_PROGRAM_ID,
 } from "@magicblock-labs/ephemeral-rollups-sdk";
@@ -117,6 +119,18 @@ describe("contract", () => {
         program.programId,
     );
 
+    // The validator that runs the ER. `magic_fee_vault` is per-validator, and
+    // the Agent/Action PDAs must be delegated to this same validator for the
+    // vault to pay their commits — so we pin it at delegation time AND derive
+    // the fee vault from it. Localnet uses the mb-test-validator identity;
+    // devnet pins the Asia validator we fund.
+    const isLocalnet =
+        ephemeralRollupConnection.rpcEndpoint.includes("localhost") ||
+        ephemeralRollupConnection.rpcEndpoint.includes("127.0.0.1");
+    const validatorPubkey = isLocalnet
+        ? new PublicKey("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev")
+        : new PublicKey("MAS1Dt9qreoRMQ14YQuhg8UTZMMzDdKhmkZMECCzk57");
+
     // `provider.sendAndConfirm` always partialSigns with the AnchorProvider's
     // wallet keypair (~/.config/solana/id.json on localnet), which throws
     // "unknown signer" whenever the feePayer differs from that wallet — which
@@ -143,7 +157,7 @@ describe("contract", () => {
     let magicFeeVault: PublicKey | undefined;
     const ensureMagicFeeVault = async (): Promise<PublicKey> => {
         if (magicFeeVault) return magicFeeVault;
-        const { magicFeeVault: pda } = await deriveMagicFeeVault(connection, agentPda);
+        const { magicFeeVault: pda } = await deriveMagicFeeVault(validatorPubkey);
         magicFeeVault = pda;
         // Fund the vault so commits have lamports to debit. Cheap on localnet,
         // ~harmless on devnet — re-runs of the test top up incrementally.
@@ -160,6 +174,34 @@ describe("contract", () => {
         ]);
         console.log(`Funded magic_fee_vault ${pda.toBase58()} with 0.05 SOL`);
         return pda;
+    };
+
+    // The Agent PDA is the bundle payer for every commit handler, so it must
+    // hold lamports ABOVE its rent-exempt minimum on the ER side. ER execution
+    // is free; commits are paid by this payer. `lamportsDelegatedTransferIx`
+    // submits a base-layer tx that shuttles lamports onto the Agent's
+    // delegated (ER) balance. The Agent must already be delegated. Idempotent
+    // per test run via the guard.
+    let agentToppedUp = false;
+    const ensureAgentToppedUp = async (): Promise<void> => {
+        if (agentToppedUp) return;
+        const salt = crypto.randomBytes(32);
+        const ix = lamportsDelegatedTransferIx(
+            relayerKeypair.publicKey,
+            agentPda,
+            BigInt(Math.floor(0.02 * LAMPORTS_PER_SOL)),
+            salt,
+        );
+        const tx = new Transaction().add(ix);
+        tx.feePayer = relayerKeypair.publicKey;
+        await sendAndConfirmTransaction(connection, tx, [relayerKeypair], {
+            commitment: "confirmed",
+            skipPreflight: true,
+        });
+        agentToppedUp = true;
+        console.log(`Topped up Agent PDA ${agentPda.toBase58()} ER lamports with 0.02 SOL`);
+        // Give the ER time to ingest the credited lamports before commits run.
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
     };
 
     console.log("\n========================================");
@@ -461,14 +503,11 @@ describe("contract", () => {
     });
 
     describe("Register Agent", () => {
-        // Local validator identity is required as the first remaining account when
-        // delegating on localnet (the magicblock validator key). On devnet/mainnet
-        // the ER picks the validator automatically.
-        const validatorAccount =
-            ephemeralRollupConnection.rpcEndpoint.includes("localhost") ||
-            ephemeralRollupConnection.rpcEndpoint.includes("127.0.0.1")
-                ? new PublicKey("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev")
-                : undefined;
+        // Pin the same validator we derive the fee vault from — `magic_fee_vault`
+        // is per-validator, so the delegated account must live on the validator
+        // whose vault is funded, or its commits fall back to (exhausted)
+        // sponsorship.
+        const validatorAccount = validatorPubkey;
 
         it("Success Register Agent", async () => {
             const registerAgentParams: RegisterAgentParams = {
@@ -500,11 +539,7 @@ describe("contract", () => {
             console.log("Agent PDA: ", agentPda.toBase58());
             const tx = new Transaction().add(registerIx).add(delegateIx);
             tx.feePayer = relayerKeypair.publicKey;
-            const txHash = await sendL1(
-                tx,
-                [relayerKeypair, ownerKeypair],
-                FINALIZED_OPTS,
-            );
+            const txHash = await sendL1(tx, [relayerKeypair, ownerKeypair], FINALIZED_OPTS);
             console.log(`Register + Delegate Agent txHash: ${txHash}`);
 
             // Wait until the ER has actually ingested the freshly-delegated
@@ -512,10 +547,7 @@ describe("contract", () => {
             // ER reads can race the delegation event and see
             // "Account does not exist" even though L1 is finalized.
             for (let attempt = 0; attempt < 30; attempt++) {
-                const onEr = await ephemeralRollupConnection.getAccountInfo(
-                    agentPda,
-                    "finalized",
-                );
+                const onEr = await ephemeralRollupConnection.getAccountInfo(agentPda, "finalized");
                 if (onEr) break;
                 await new Promise((resolve) => setTimeout(resolve, 1_000));
             }
@@ -524,6 +556,11 @@ describe("contract", () => {
             expect(agentOnL1.active).to.equal(true);
             const agentOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
             expect(agentOnEr.active).to.equal(true);
+
+            // The Agent PDA is now delegated and is the bundle payer for every
+            // commit handler — fund its ER-side lamports so commits don't
+            // breach its rent-exempt minimum.
+            await ensureAgentToppedUp();
         });
 
         // The deactivate / active tests only assert the ER state. The L1
@@ -727,11 +764,9 @@ describe("contract", () => {
     // delegated `agentPda`. We re-use it here.
     // ─────────────────────────────────────────────────────────────────────────
     describe("Action Flow (Init → Delegate → Append → Finalize)", () => {
-        const validatorAccount =
-            ephemeralRollupConnection.rpcEndpoint.includes("localhost") ||
-            ephemeralRollupConnection.rpcEndpoint.includes("127.0.0.1")
-                ? new PublicKey("mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev")
-                : undefined;
+        // Pin the same validator the Agent is delegated to and the fee vault is
+        // derived from — see the note in "Register Agent".
+        const validatorAccount = validatorPubkey;
 
         const actionId = new anchor.BN(1);
         const recipientKeypair = Keypair.generate();
@@ -825,20 +860,13 @@ describe("contract", () => {
 
             const tx = new Transaction().add(initIx).add(delegateIx);
             tx.feePayer = relayerKeypair.publicKey;
-            const txHash = await sendL1(
-                tx,
-                [relayerKeypair, agentWalletKeypair],
-                FINALIZED_OPTS,
-            );
+            const txHash = await sendL1(tx, [relayerKeypair, agentWalletKeypair], FINALIZED_OPTS);
             console.log(`Init + Delegate Action txHash: ${txHash}`);
 
             // Wait until the ER has actually ingested the freshly-delegated
             // Action PDA (mirrors the agent ingestion poll above).
             for (let attempt = 0; attempt < 30; attempt++) {
-                const onEr = await ephemeralRollupConnection.getAccountInfo(
-                    actionPda,
-                    "finalized",
-                );
+                const onEr = await ephemeralRollupConnection.getAccountInfo(actionPda, "finalized");
                 if (onEr) break;
                 await new Promise((resolve) => setTimeout(resolve, 1_000));
             }
@@ -889,9 +917,7 @@ describe("contract", () => {
                         preflightCommitment: "finalized",
                     },
                 );
-                console.log(
-                    `    appendPayload offset=${c.offset} len=${c.chunk.length} → ${sig}`,
-                );
+                console.log(`    appendPayload offset=${c.offset} len=${c.chunk.length} → ${sig}`);
             }
 
             const action = await ephemeralProgram.account.action.fetch(actionPda);
@@ -967,21 +993,13 @@ describe("contract", () => {
             const programId = decodedMsg.staticAccountKeys[ix.programIdIndex];
             expect(programId.toBase58()).to.equal(SystemProgram.programId.toBase58());
 
-            const ixAccountKeys = ix.accountKeyIndexes.map(
-                (i) => decodedMsg.staticAccountKeys[i],
-            );
+            const ixAccountKeys = ix.accountKeyIndexes.map((i) => decodedMsg.staticAccountKeys[i]);
             expect(ixAccountKeys.length).to.equal(2);
-            expect(ixAccountKeys[0].toBase58()).to.equal(
-                agentWalletKeypair.publicKey.toBase58(),
-            );
-            expect(ixAccountKeys[1].toBase58()).to.equal(
-                recipientKeypair.publicKey.toBase58(),
-            );
+            expect(ixAccountKeys[0].toBase58()).to.equal(agentWalletKeypair.publicKey.toBase58());
+            expect(ixAccountKeys[1].toBase58()).to.equal(recipientKeypair.publicKey.toBase58());
 
             // Bytes of the System transfer ix data must match what we built.
-            expect(Buffer.from(ix.data).equals(Buffer.from(transferIx.data))).to.equal(
-                true,
-            );
+            expect(Buffer.from(ix.data).equals(Buffer.from(transferIx.data))).to.equal(true);
 
             // Relayer-side commitment verification: hash the decrypted bytes
             // and check it matches what the SDK stored at finalize.
@@ -1060,7 +1078,7 @@ describe("contract", () => {
             const delIx = await delegateActionIx(program, {
                 accounts: {
                     relayer: relayerKeypair.publicKey,
-                    owner: ownerKeypair.publicKey,
+                    agentWallet: agentWalletKeypair.publicKey,
                     agent: agentPda,
                     action: pda,
                     config: configPda,
@@ -1077,10 +1095,7 @@ describe("contract", () => {
             );
 
             for (let attempt = 0; attempt < 30; attempt++) {
-                const onEr = await ephemeralRollupConnection.getAccountInfo(
-                    pda,
-                    "finalized",
-                );
+                const onEr = await ephemeralRollupConnection.getAccountInfo(pda, "finalized");
                 if (onEr) break;
                 await new Promise((resolve) => setTimeout(resolve, 1_000));
             }
@@ -1228,9 +1243,7 @@ describe("contract", () => {
             );
 
             const rawScore = 10_000;
-            const reasoningHash = commitmentHashAsArray(
-                Buffer.from("approved: low risk", "utf8"),
-            );
+            const reasoningHash = commitmentHashAsArray(Buffer.from("approved: low risk", "utf8"));
             const beforeAgent = await ephemeralProgram.account.agent.fetch(agentPda);
 
             const ix = await verdictActionIx(program, {

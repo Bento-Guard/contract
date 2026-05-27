@@ -7,6 +7,7 @@ use ephemeral_rollups_sdk::{
 use crate::{
   common::{constant, error::BentoError, event},
   states::{Agent, Config},
+  utils::magicblock_utils::as_signer,
 };
 
 pub fn process(ctx: Context<DeactivateAgent>) -> Result<()> {
@@ -15,17 +16,28 @@ pub fn process(ctx: Context<DeactivateAgent>) -> Result<()> {
     config.is_in_maintenance()?;
   }
 
-  let agent = &mut ctx.accounts.agent;
-  agent.deactivate();
+  let (agent_wallet, agent_bump) = {
+    let agent = &mut ctx.accounts.agent;
+    agent.deactivate();
+    (agent.agent_wallet, agent.bump)
+  };
+
+  // The Agent PDA is the delegated bundle payer (kept topped up on the ER)
+  let agent_seeds: &[&[&[u8]]] = &[&[
+    constant::PREFIX_SEED,
+    b"agent",
+    agent_wallet.as_ref(),
+    &[agent_bump],
+  ]];
 
   MagicIntentBundleBuilder::new(
-    ctx.accounts.relayer.to_account_info(),
+    as_signer(ctx.accounts.agent.to_account_info()),
     ctx.accounts.magic_context.to_account_info(),
     ctx.accounts.magic_program.to_account_info(),
   )
   .magic_fee_vault(ctx.accounts.magic_fee_vault.to_account_info())
   .commit(&[ctx.accounts.agent.to_account_info()])
-  .build_and_invoke()?;
+  .build_and_invoke_signed(agent_seeds)?;
 
   emit!(event::DeactivateAgent {
     agent: ctx.accounts.agent.key(),
