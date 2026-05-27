@@ -7,6 +7,7 @@ use ephemeral_rollups_sdk::{
 use crate::{
   common::{constant, error::BentoError, event},
   states::{Action, ActionStatus, Agent, Config},
+  utils::magicblock_utils::as_signer,
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
@@ -113,8 +114,18 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
     });
   }
 
+  // The Agent PDA is the delegated bundle payer (kept topped up on the ER);
+  let agent_wallet = ctx.accounts.agent.agent_wallet;
+  let agent_bump = ctx.accounts.agent.bump;
+  let agent_seeds: &[&[&[u8]]] = &[&[
+    constant::PREFIX_SEED,
+    b"agent",
+    agent_wallet.as_ref(),
+    &[agent_bump],
+  ]];
+
   MagicIntentBundleBuilder::new(
-    ctx.accounts.relayer.to_account_info(),
+    as_signer(ctx.accounts.agent.to_account_info()),
     ctx.accounts.magic_context.to_account_info(),
     ctx.accounts.magic_program.to_account_info(),
   )
@@ -123,7 +134,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
     ctx.accounts.action.to_account_info(),
     ctx.accounts.agent.to_account_info(),
   ])
-  .build_and_invoke()?;
+  .build_and_invoke_signed(agent_seeds)?;
 
   Ok(())
 }

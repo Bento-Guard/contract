@@ -7,6 +7,7 @@ use ephemeral_rollups_sdk::{
 use crate::{
   common::{constant, error::BentoError},
   states::{Agent, AllowedTarget, Config},
+  utils::magicblock_utils::as_signer,
 };
 
 pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTarget) -> Result<()> {
@@ -15,23 +16,36 @@ pub fn process(ctx: Context<UpdateAgentProgramTarget>, target_update: AllowedTar
     config.is_in_maintenance()?;
   }
 
-  let agent = &mut ctx.accounts.agent;
+  let agent_bump = {
+    let agent = &mut ctx.accounts.agent;
 
-  let existing = agent.find_mut_program_allowed_target(target_update.target);
-  if let Some(target) = existing {
-    target.allowed = target_update.allowed;
-  } else {
-    agent.add_program_allowed_target(target_update.target)?;
-  }
+    let existing = agent.find_mut_program_allowed_target(target_update.target);
+    if let Some(target) = existing {
+      target.allowed = target_update.allowed;
+    } else {
+      agent.add_program_allowed_target(target_update.target)?;
+    }
+
+    agent.bump
+  };
+
+  // The Agent PDA is the delegated bundle payer (kept topped up on the ER);
+  let agent_wallet = ctx.accounts.agent_wallet.key();
+  let agent_seeds: &[&[&[u8]]] = &[&[
+    constant::PREFIX_SEED,
+    b"agent",
+    agent_wallet.as_ref(),
+    &[agent_bump],
+  ]];
 
   MagicIntentBundleBuilder::new(
-    ctx.accounts.relayer.to_account_info(),
+    as_signer(ctx.accounts.agent.to_account_info()),
     ctx.accounts.magic_context.to_account_info(),
     ctx.accounts.magic_program.to_account_info(),
   )
   .magic_fee_vault(ctx.accounts.magic_fee_vault.to_account_info())
   .commit(&[ctx.accounts.agent.to_account_info()])
-  .build_and_invoke()?;
+  .build_and_invoke_signed(agent_seeds)?;
 
   Ok(())
 }
