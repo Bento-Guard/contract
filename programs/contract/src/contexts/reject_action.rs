@@ -13,12 +13,29 @@ pub fn process(ctx: Context<RejectAction>) -> Result<()> {
 
   action.move_to_status(ActionStatus::Rejected);
 
+  agent.add_strike();
+  let auto_deactivated = agent.auto_deactivate_if_max_strikes(ctx.accounts.config.max_strikes);
+
   emit!(event::EscalationResolved {
     action_id: action.action_id,
     agent: agent.key(),
     final_decision: action.decision,
     owner: agent.owner,
   });
+
+  emit!(event::StrikeAdded {
+    agent: agent.key(),
+    strikes: agent.strikes,
+    raw_score: action.raw_score,
+  });
+
+  if auto_deactivated {
+    emit!(event::AgentAutoDeactivated {
+      agent: agent.key(),
+      threat_score: agent.threat_score,
+      strikes: agent.strikes,
+    });
+  }
 
   Ok(())
 }
