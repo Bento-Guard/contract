@@ -50,7 +50,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
     agent.apply_threat_score(raw_score, config.ema_alpha, config.ema_scale);
     agent.record_decision(decision);
 
-    let strike_added = if raw_score >= config.escalate_threshold {
+    let strike_added = if raw_score >= config.block_threshold {
       agent.add_strike();
       true
     } else {
