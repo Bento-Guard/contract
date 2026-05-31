@@ -7,6 +7,8 @@ export interface FinalizeActionBuildingAccounts {
   agentWallet: PublicKey;
   agent: PublicKey;
   action: PublicKey;
+  /** VaultSponsor PDA — the delegated commit fee payer. Derive with `seeds.vaultSponsor()`. */
+  vaultSponsor: PublicKey;
   config: PublicKey;
   magicProgram: PublicKey;
   magicContext: PublicKey;
@@ -36,6 +38,7 @@ export const finalizeActionBuildingIx = async (
       agentWallet: payload.accounts.agentWallet,
       agent: payload.accounts.agent,
       action: payload.accounts.action,
+      vaultSponsor: payload.accounts.vaultSponsor,
       config: payload.accounts.config,
       magicProgram: payload.accounts.magicProgram,
       magicContext: payload.accounts.magicContext,

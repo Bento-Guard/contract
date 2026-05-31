@@ -17,7 +17,9 @@ import {
     VersionedTransaction,
 } from "@solana/web3.js";
 import {
+    deriveRentPda,
     GetCommitmentSignature,
+    initRentPdaIx,
     lamportsDelegatedTransferIx,
     MAGIC_CONTEXT_ID,
     MAGIC_PROGRAM_ID,
@@ -36,7 +38,9 @@ import {
     decryptFromAgent,
     delegateActionIx,
     delegateAgentIx,
+    delegateVaultSponsorIx,
     deriveMagicFeeVault,
+    initVaultSponsorIx,
     encodeActionPayload,
     encryptForRelayer,
     finalizeActionBuildingIx,
@@ -118,6 +122,13 @@ describe("contract", () => {
         seeds.agent(agentWalletKeypair.publicKey),
         program.programId,
     );
+    // Singleton admin-controlled PDA that pays every commit's MagicBlock fees.
+    // Initialized + delegated by the operator in the "Vault Sponsor" describe
+    // below, then funded on the ER so it can debit commit fees.
+    const [vaultSponsorPda] = PublicKey.findProgramAddressSync(
+        seeds.vaultSponsor(),
+        program.programId,
+    );
 
     // The validator that runs the ER. `magic_fee_vault` is per-validator, and
     // the Agent/Action PDAs must be delegated to this same validator for the
@@ -176,30 +187,65 @@ describe("contract", () => {
         return pda;
     };
 
-    // The Agent PDA is the bundle payer for every commit handler, so it must
-    // hold lamports ABOVE its rent-exempt minimum on the ER side. ER execution
-    // is free; commits are paid by this payer. `lamportsDelegatedTransferIx`
-    // submits a base-layer tx that shuttles lamports onto the Agent's
-    // delegated (ER) balance. The Agent must already be delegated. Idempotent
-    // per test run via the guard.
-    let agentToppedUp = false;
-    const ensureAgentToppedUp = async (): Promise<void> => {
-        if (agentToppedUp) return;
+    // The VaultSponsor PDA is the bundle payer for every commit handler, so it
+    // must hold lamports ABOVE its rent-exempt minimum on the ER side. ER
+    // execution is free; commits are paid by this payer. `lamportsDelegatedTransferIx`
+    // submits a base-layer tx that shuttles lamports onto the VaultSponsor's
+    // delegated (ER) balance. The VaultSponsor must already be delegated.
+    // Idempotent per test run via the guard.
+    // `lamportsDelegatedTransferIx` shuttles lamports onto a delegated account
+    // by creating a single-use escrow PDA whose delegation accounts must be
+    // rent-exempt. The Ephemeral SPL Token program sponsors that rent from a
+    // GLOBAL rent PDA (seeds ["rent"]). On a fresh validator that PDA doesn't
+    // exist / is unfunded, so the shuttle fails with "insufficient lamports …
+    // need 890880". Initialize it (once) and keep it funded before topping up.
+    let rentPdaReady = false;
+    const ensureRentPdaFunded = async (): Promise<void> => {
+        if (rentPdaReady) return;
+        const [rentPda] = deriveRentPda();
+        const info = await connection.getAccountInfo(rentPda, "finalized");
+        const tx = new Transaction();
+        if (!info || info.data.length === 0) {
+            tx.add(initRentPdaIx(operatorKeypair.publicKey, rentPda));
+        }
+        // Fund generously — each shuttle consumes ~0.00089 SOL of sponsored
+        // rent; 0.05 SOL covers dozens of top-ups across a test run.
+        tx.add(
+            SystemProgram.transfer({
+                fromPubkey: operatorKeypair.publicKey,
+                toPubkey: rentPda,
+                lamports: 0.05 * LAMPORTS_PER_SOL,
+            }),
+        );
+        tx.feePayer = operatorKeypair.publicKey;
+        await sendAndConfirmTransaction(connection, tx, [operatorKeypair], {
+            commitment: "confirmed",
+        });
+        rentPdaReady = true;
+        console.log(`Funded Ephemeral SPL Token rent PDA ${rentPda.toBase58()} with 0.05 SOL`);
+    };
+
+    let vaultSponsorToppedUp = false;
+    const ensureVaultSponsorToppedUp = async (): Promise<void> => {
+        if (vaultSponsorToppedUp) return;
+        await ensureRentPdaFunded();
         const salt = crypto.randomBytes(32);
         const ix = lamportsDelegatedTransferIx(
-            relayerKeypair.publicKey,
-            agentPda,
+            operatorKeypair.publicKey,
+            vaultSponsorPda,
             BigInt(Math.floor(0.02 * LAMPORTS_PER_SOL)),
             salt,
         );
         const tx = new Transaction().add(ix);
-        tx.feePayer = relayerKeypair.publicKey;
-        await sendAndConfirmTransaction(connection, tx, [relayerKeypair], {
+        tx.feePayer = operatorKeypair.publicKey;
+        await sendAndConfirmTransaction(connection, tx, [operatorKeypair], {
             commitment: "confirmed",
             skipPreflight: true,
         });
-        agentToppedUp = true;
-        console.log(`Topped up Agent PDA ${agentPda.toBase58()} ER lamports with 0.02 SOL`);
+        vaultSponsorToppedUp = true;
+        console.log(
+            `Topped up VaultSponsor PDA ${vaultSponsorPda.toBase58()} ER lamports with 0.02 SOL`,
+        );
         // Give the ER time to ingest the credited lamports before commits run.
         await new Promise((resolve) => setTimeout(resolve, 3_000));
     };
@@ -215,13 +261,36 @@ describe("contract", () => {
     console.log(`  Owner Pubkey            : ${ownerKeypair.publicKey.toBase58()}`);
     console.log(`  Agent Wallet Pubkey     : ${agentWalletKeypair.publicKey.toBase58()}`);
 
-    // Airdrop the operator, relayer, owner, and agent wallet.
+    // Fund the operator, relayer, owner, and agent wallet — and CONFIRM the
+    // airdrops. `requestAirdrop` only returns a signature; the lamports aren't
+    // visible until the airdrop tx is confirmed. Because every tx here uses a
+    // `finalized` preflight, we must confirm at `finalized` or the first
+    // transaction simulates against an empty fee-payer ("Attempt to debit an
+    // account but found no record of a prior credit"). Guarded by a balance
+    // floor so this is a cheap no-op after the first run.
+    const FUND_FLOOR = 1 * LAMPORTS_PER_SOL;
+    const FUND_TOPUP = 5 * LAMPORTS_PER_SOL;
+    const ensureFunded = async (pubkey: PublicKey): Promise<void> => {
+        const balance = await connection.getBalance(pubkey, "finalized");
+        if (balance >= FUND_FLOOR) return;
+        const sig = await connection.requestAirdrop(pubkey, FUND_TOPUP);
+        const bh = await connection.getLatestBlockhash("finalized");
+        await connection.confirmTransaction(
+            {
+                signature: sig,
+                blockhash: bh.blockhash,
+                lastValidBlockHeight: bh.lastValidBlockHeight,
+            },
+            "finalized",
+        );
+    };
+
     beforeEach(async () => {
         await Promise.all([
-            provider.connection.requestAirdrop(operatorKeypair.publicKey, 100_000_000),
-            provider.connection.requestAirdrop(relayerKeypair.publicKey, 100_000_000),
-            provider.connection.requestAirdrop(ownerKeypair.publicKey, 100_000_000),
-            provider.connection.requestAirdrop(agentWalletKeypair.publicKey, 100_000_000),
+            ensureFunded(operatorKeypair.publicKey),
+            ensureFunded(relayerKeypair.publicKey),
+            ensureFunded(ownerKeypair.publicKey),
+            ensureFunded(agentWalletKeypair.publicKey),
         ]);
     });
 
@@ -272,32 +341,120 @@ describe("contract", () => {
                 emaScale: 1_000,
             };
 
-            const ix = await initializeIx(program, {
-                accounts: {
-                    operator: operatorKeypair.publicKey,
-                    config: configPda,
-                },
-                params: initializeConfigParams,
-            });
+            // Config is a singleton — skip init if it already exists so the
+            // suite is re-runnable on a validator that wasn't `--reset`.
+            const existing = await connection.getAccountInfo(configPda, "finalized");
+            const created = !existing;
+            if (created) {
+                const ix = await initializeIx(program, {
+                    accounts: {
+                        operator: operatorKeypair.publicKey,
+                        config: configPda,
+                    },
+                    params: initializeConfigParams,
+                });
 
-            const tx = new Transaction().add(ix);
-            const signature = await sendL1(tx, [operatorKeypair]);
-            console.log(`  Initialize tx signature: ${signature}`);
+                const tx = new Transaction().add(ix);
+                const signature = await sendL1(tx, [operatorKeypair]);
+                console.log(`  Initialize tx signature: ${signature}`);
+            } else {
+                console.log("  Config already exists — skipping initialize");
+            }
 
             const config = await program.account.config.fetch(configPda);
 
+            // Stable fields hold regardless of whether we created it this run.
             expect(config.operator.toBase58()).to.equal(operatorKeypair.publicKey.toBase58());
             expect(config.relayer.toBase58()).to.equal(relayerKeypair.publicKey.toBase58());
-            expect(config.relayerEncryptionKey).to.deep.equal(
-                initializeConfigParams.relayerEncryptionKey,
-            );
             expect(config.escalateThreshold).to.equal(initializeConfigParams.escalateThreshold);
             expect(config.blockThreshold).to.equal(initializeConfigParams.blockThreshold);
             expect(config.maxStrikes).to.equal(initializeConfigParams.maxStrikes);
             expect(config.emaAlpha).to.equal(initializeConfigParams.emaAlpha);
             expect(config.emaScale).to.equal(initializeConfigParams.emaScale);
-            expect(config.totalAgents.toNumber()).to.equal(0);
             expect(config.maintenance).to.equal(false);
+
+            // The encryption key is a fresh random keypair per run and
+            // `total_agents` is a running counter — only meaningful when we
+            // just created the config this run.
+            if (created) {
+                expect(config.relayerEncryptionKey).to.deep.equal(
+                    initializeConfigParams.relayerEncryptionKey,
+                );
+                expect(config.totalAgents.toNumber()).to.equal(0);
+            }
+        });
+    });
+
+    // The VaultSponsor is the admin-owned PDA that pays the MagicBlock commit
+    // fees for every commit handler (finalize / verdict / agent lifecycle). It
+    // must be initialized + delegated to the SAME validator as the Agent/Action
+    // PDAs (so the per-validator magic_fee_vault applies) and funded on the ER
+    // before any commit runs.
+    describe("Vault Sponsor", () => {
+        // The VaultSponsor is a singleton set up exactly once. Make init +
+        // delegate idempotent so the suite is robust against a validator that
+        // wasn't `--reset` between runs: skip init if the PDA already exists,
+        // skip delegate if it's already owned by the delegation program.
+        const DELEGATION_PROGRAM_ID = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
+
+        it("Success init + delegate Vault Sponsor", async () => {
+            const existing = await connection.getAccountInfo(vaultSponsorPda, "finalized");
+            const alreadyDelegated = existing?.owner.toBase58() === DELEGATION_PROGRAM_ID;
+
+            const ixs: TransactionInstruction[] = [];
+            if (!existing) {
+                ixs.push(
+                    await initVaultSponsorIx(program, {
+                        accounts: {
+                            operator: operatorKeypair.publicKey,
+                            vaultSponsor: vaultSponsorPda,
+                        },
+                    }),
+                );
+            } else {
+                console.log("VaultSponsor PDA already exists — skipping init");
+            }
+            if (!alreadyDelegated) {
+                ixs.push(
+                    await delegateVaultSponsorIx(program, {
+                        accounts: {
+                            operator: operatorKeypair.publicKey,
+                            vaultSponsor: vaultSponsorPda,
+                            config: configPda,
+                            ownerProgram: program.programId,
+                        },
+                        validator: validatorPubkey,
+                    }),
+                );
+            } else {
+                console.log("VaultSponsor PDA already delegated — skipping delegate");
+            }
+
+            if (ixs.length > 0) {
+                const tx = new Transaction();
+                ixs.forEach((ix) => tx.add(ix));
+                tx.feePayer = operatorKeypair.publicKey;
+                const txHash = await sendL1(tx, [operatorKeypair], FINALIZED_OPTS);
+                console.log(`Init + Delegate Vault Sponsor txHash: ${txHash}`);
+            }
+
+            // Wait until the ER has ingested the delegated VaultSponsor PDA
+            // before topping it up / using it as a commit payer.
+            for (let attempt = 0; attempt < 30; attempt++) {
+                const onEr = await ephemeralRollupConnection.getAccountInfo(
+                    vaultSponsorPda,
+                    "finalized",
+                );
+                if (onEr) break;
+                await new Promise((resolve) => setTimeout(resolve, 1_000));
+            }
+
+            const onEr = await ephemeralRollupConnection.getAccountInfo(vaultSponsorPda, "finalized");
+            expect(onEr, "VaultSponsor should be delegated and visible on the ER").to.not.be.null;
+
+            // Fund the VaultSponsor's ER-side lamports so its commits don't
+            // breach its rent-exempt minimum.
+            await ensureVaultSponsorToppedUp();
         });
     });
 
@@ -557,10 +714,9 @@ describe("contract", () => {
             const agentOnEr = await ephemeralProgram.account.agent.fetch(agentPda);
             expect(agentOnEr.active).to.equal(true);
 
-            // The Agent PDA is now delegated and is the bundle payer for every
-            // commit handler — fund its ER-side lamports so commits don't
-            // breach its rent-exempt minimum.
-            await ensureAgentToppedUp();
+            // Commit fees are now paid by the VaultSponsor PDA (set up in the
+            // "Vault Sponsor" describe), so the Agent no longer needs its own
+            // ER-side lamport balance.
         });
 
         // The deactivate / active tests only assert the ER state. The L1
@@ -583,6 +739,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
             });
@@ -618,6 +775,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
             });
@@ -663,6 +821,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
@@ -714,6 +873,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
@@ -935,6 +1095,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { commitmentHash: commitment },
@@ -1088,11 +1249,9 @@ describe("contract", () => {
             });
             const initDelTx = new Transaction().add(initIx).add(delIx);
             initDelTx.feePayer = relayerKeypair.publicKey;
-            await sendL1(
-                initDelTx,
-                [relayerKeypair, ownerKeypair, agentWalletKeypair],
-                FINALIZED_OPTS,
-            );
+            // init_action / delegate_action require relayer + agent_wallet only
+            // (NOT owner) — passing ownerKeypair here throws "unknown signer".
+            await sendL1(initDelTx, [relayerKeypair, agentWalletKeypair], FINALIZED_OPTS);
 
             for (let attempt = 0; attempt < 30; attempt++) {
                 const onEr = await ephemeralRollupConnection.getAccountInfo(pda, "finalized");
@@ -1134,6 +1293,7 @@ describe("contract", () => {
                     config: configPda,
                     magicProgram: MAGIC_PROGRAM_ID,
                     magicContext: MAGIC_CONTEXT_ID,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { commitmentHash: commit },
@@ -1170,6 +1330,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: actionPda,
                     config: configPda,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { rawScore, reasoningHash },
@@ -1195,8 +1356,10 @@ describe("contract", () => {
             expect(Array.from(action.reasoningHash)).to.deep.equal(reasoningHash);
 
             const afterAgent = await ephemeralProgram.account.agent.fetch(agentPda);
-            // raw_score >= escalate_threshold → strike added
-            expect(afterAgent.strikes).to.equal(beforeAgent.strikes + 1);
+            // Strikes are applied only on the Blocked path (raw_score >=
+            // block_threshold). Escalated (escalate <= raw_score < block) adds
+            // NO strike — see verdict_action.rs (`strike_added` on block only).
+            expect(afterAgent.strikes).to.equal(beforeAgent.strikes);
             expect(afterAgent.totalEscalated.toNumber()).to.equal(
                 beforeAgent.totalEscalated.toNumber() + 1,
             );
@@ -1252,6 +1415,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { rawScore, reasoningHash },
@@ -1302,6 +1466,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: { rawScore, reasoningHash },
@@ -1347,6 +1512,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {
@@ -1417,6 +1583,7 @@ describe("contract", () => {
                     agent: agentPda,
                     action: pda,
                     config: configPda,
+                    vaultSponsor: vaultSponsorPda,
                     magicFeeVault: await ensureMagicFeeVault(),
                 },
                 params: {

@@ -6,7 +6,7 @@ use ephemeral_rollups_sdk::{
 
 use crate::{
   common::{constant, error::BentoError, event},
-  states::{Action, ActionStatus, Agent, Config},
+  states::{Action, ActionStatus, Agent, Config, VaultSponsor},
   utils::magicblock_utils::as_signer,
 };
 
@@ -50,7 +50,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
     agent.apply_threat_score(raw_score, config.ema_alpha, config.ema_scale);
     agent.record_decision(decision);
 
-    let strike_added = if raw_score >= config.escalate_threshold {
+    let strike_added = if raw_score >= config.block_threshold {
       agent.add_strike();
       true
     } else {
@@ -114,18 +114,15 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
     });
   }
 
-  // The Agent PDA is the delegated bundle payer (kept topped up on the ER);
-  let agent_wallet = ctx.accounts.agent.agent_wallet;
-  let agent_bump = ctx.accounts.agent.bump;
-  let agent_seeds: &[&[&[u8]]] = &[&[
+  let vault_sponsor_bump = ctx.accounts.vault_sponsor.bump;
+  let vault_sponsor_seeds: &[&[&[u8]]] = &[&[
     constant::PREFIX_SEED,
-    b"agent",
-    agent_wallet.as_ref(),
-    &[agent_bump],
+    b"vault_sponsor",
+    &[vault_sponsor_bump],
   ]];
 
   MagicIntentBundleBuilder::new(
-    as_signer(ctx.accounts.agent.to_account_info()),
+    as_signer(ctx.accounts.vault_sponsor.to_account_info()),
     ctx.accounts.magic_context.to_account_info(),
     ctx.accounts.magic_program.to_account_info(),
   )
@@ -134,7 +131,7 @@ pub fn process(ctx: Context<VerdictAction>, params: VerdictActionParams) -> Resu
     ctx.accounts.action.to_account_info(),
     ctx.accounts.agent.to_account_info(),
   ])
-  .build_and_invoke_signed(agent_seeds)?;
+  .build_and_invoke_signed(vault_sponsor_seeds)?;
 
   Ok(())
 }
@@ -153,6 +150,13 @@ pub struct VerdictAction<'info> {
 
   #[account(mut)]
   pub action: AccountLoader<'info, Action>,
+
+  #[account(
+    mut,
+    seeds = [constant::PREFIX_SEED, b"vault_sponsor"],
+    bump = vault_sponsor.bump
+  )]
+  pub vault_sponsor: Account<'info, VaultSponsor>,
 
   #[account(
     seeds = [constant::PREFIX_SEED, b"config"],

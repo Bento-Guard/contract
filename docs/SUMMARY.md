@@ -78,6 +78,7 @@ We use MagicBlock ER (non-TEE) for the **action processing hot path**. ER provid
 | Config PDA  | L1 only                             | Rarely changes, globally readable |
 | Agent PDA   | L1 → delegated to ER on register, then stays delegated for its whole lifecycle | Hot path during active use; state committed back to L1 on every verdict, finalize, deactivate, and re-activate (Agent stays delegated to ER throughout — `deactivate_agent` and `active_agent` only mirror the new `active` flag to L1) |
 | Action PDA  | Created on L1 → delegated to ER     | Chunked writes and verdict happen in ER; committed back to L1 at finalize and at verdict |
+| VaultSponsor PDA | L1 → delegated to ER, stays delegated | Admin-controlled, operator-funded singleton that **pays the MagicBlock commit fees for every commit handler** (finalize, verdict, agent lifecycle). It is the intent-bundle payer (signs via its seeds); the Agent/Action PDAs remain the committed accounts. Replaces the old design where the Agent PDA paid its own commits |
 
 The inline `allowed_targets` whitelist is part of the Agent PDA (not a separate account), so it follows the agent through delegation.
 
@@ -120,6 +121,22 @@ Stores global program configuration:
 | `_padding` | `[u64; 8]` | Reserved |
 
 Created once via `initialize()`. Threshold / EMA / strike values are chosen by the operator at init — they are not hardcoded constants. Updated via `update_config()` (any subset of fields, optional) or `update_maintenance()`.
+
+### VaultSponsor PDA (singleton)
+
+```
+Seeds: [b"bento", b"vault_sponsor"]
+```
+
+Admin-controlled, ER-delegated PDA that pays the MagicBlock commit fees for every commit handler. The operator creates it (`init_vault_sponsor`), delegates it to the ER (`delegate_vault_sponsor`, pinned to the same validator as the Agent/Action PDAs so the per-validator `magic_fee_vault` applies), then funds it on both L1 (rent) and the ER (commit-fee lamports via `lamportsDelegatedTransferIx`).
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `operator` | `Pubkey` | Admin authority that initialized / funds the vault |
+| `bump` | `u8` | |
+| `_padding` | `[u64; 8]` | Reserved |
+
+In each commit handler the VaultSponsor is the intent-bundle **payer** (`MagicIntentBundleBuilder::new(as_signer(vault_sponsor), …).build_and_invoke_signed(vault_sponsor_seeds)`); the Agent and Action PDAs stay the **committed** accounts. Payer and committed accounts are independent, so agents no longer have to keep their own ER balance topped up.
 
 ### Agent PDA (one per registered agent)
 
@@ -209,6 +226,8 @@ There is **no separate `Decision` enum** — the `decision` field is a `u8` mirr
 | `initialize` | Create Config PDA with relayer pubkey, encryption key, thresholds, max strikes, EMA params |
 | `update_config` | Optional fields to rotate relayer / encryption key, change thresholds / strikes / EMA |
 | `update_maintenance` | Toggle the `maintenance` flag; while true, all mutating instructions reject with `BentoIsInMaintenance` |
+| `init_vault_sponsor` | Create the singleton VaultSponsor PDA (operator-only); operator pays rent |
+| `delegate_vault_sponsor` | Delegate the VaultSponsor PDA to the ER (operator-only), pinned to the validator whose `magic_fee_vault` is funded |
 
 ### Agent Lifecycle
 
@@ -277,6 +296,7 @@ Low scores = safe. High scores = dangerous. EMA smooths individual spikes — on
 |-------|-----------|
 | `InitializeConfig` | `initialize` |
 | `UpdateConfig` | `update_config` |
+| `InitVaultSponsor` | `init_vault_sponsor` |
 | `RegisterAgent` | `register_agent` |
 | `DeactivateAgent` | `deactivate_agent` |
 | `ActiveAgent` | `active_agent` |
@@ -370,9 +390,10 @@ Under the hood, `protect()` handles:
 ### PDA Seeds Convention
 
 ```
-Config:  [b"bento", b"config"]
-Agent:   [b"bento", b"agent", agent_wallet]
-Action:  [b"bento", b"action", agent_pda, action_id_le_bytes]
+Config:        [b"bento", b"config"]
+Agent:         [b"bento", b"agent", agent_wallet]
+Action:        [b"bento", b"action", agent_pda, action_id_le_bytes]
+VaultSponsor:  [b"bento", b"vault_sponsor"]
 ```
 
 All program PDAs are prefixed with `PREFIX_SEED = b"bento"`. There is no AllowedTarget PDA — the whitelist is inline on the Agent PDA. There is no TrustCheck PDA in the current program.

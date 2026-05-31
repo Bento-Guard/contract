@@ -28,6 +28,14 @@ pub mod contract {
     admin::update_maintenance::process(ctx, maintenance)
   }
 
+  pub fn init_vault_sponsor(ctx: Context<InitVaultSponsor>) -> Result<()> {
+    admin::init_vault_sponsor::process(ctx)
+  }
+
+  pub fn delegate_vault_sponsor(ctx: Context<DelegateVaultSponsor>) -> Result<()> {
+    admin::delegate_vault_sponsor::process(ctx)
+  }
+
   pub fn register_agent(ctx: Context<RegisterAgent>, params: RegisterAgentParams) -> Result<()> {
     register_agent::process(ctx, params)
   }
