@@ -6,6 +6,8 @@ export interface VerdictActionAccounts {
   relayer: PublicKey;
   agent: PublicKey;
   action: PublicKey;
+  /** VaultSponsor PDA — the delegated commit fee payer. Derive with `seeds.vaultSponsor()`. */
+  vaultSponsor: PublicKey;
   config: PublicKey;
   /**
    * Canonical magic fee vault PDA — derive with `deriveMagicFeeVault`.
@@ -36,6 +38,7 @@ export const verdictActionIx = async (
       relayer: payload.accounts.relayer,
       agent: payload.accounts.agent,
       action: payload.accounts.action,
+      vaultSponsor: payload.accounts.vaultSponsor,
       config: payload.accounts.config,
       magicFeeVault: payload.accounts.magicFeeVault,
     })

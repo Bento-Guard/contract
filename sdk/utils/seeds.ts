@@ -7,6 +7,10 @@ export const seeds = {
     return [Buffer.from(PREFIX_SEED), Buffer.from("config")];
   },
 
+  vaultSponsor: () => {
+    return [Buffer.from(PREFIX_SEED), Buffer.from("vault_sponsor")];
+  },
+
   agent: (agentWallet: PublicKey) => {
     return [
       Buffer.from(PREFIX_SEED),

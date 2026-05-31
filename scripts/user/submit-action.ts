@@ -184,6 +184,7 @@ const main = async () => {
             config: ctx.configPda,
             magicProgram: MAGIC_PROGRAM_ID,
             magicContext: MAGIC_CONTEXT_ID,
+            vaultSponsor: ctx.vaultSponsorPda,
             magicFeeVault: ctx.magicFeeVault,
         },
         params: { commitmentHash: commitment },

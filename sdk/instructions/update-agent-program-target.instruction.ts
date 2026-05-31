@@ -8,6 +8,8 @@ export interface UpdateAgentProgramTargetAccounts {
   owner: PublicKey;
   agentWallet: PublicKey;
   agent: PublicKey;
+  /** VaultSponsor PDA — the delegated commit fee payer. Derive with `seeds.vaultSponsor()`. */
+  vaultSponsor: PublicKey;
   config: PublicKey;
   magicProgram: PublicKey;
   magicContext: PublicKey;
@@ -36,6 +38,7 @@ export const updateAgentProgramTargetIx = async (
       owner: payload.accounts.owner,
       agentWallet: payload.accounts.agentWallet,
       agent: payload.accounts.agent,
+      vaultSponsor: payload.accounts.vaultSponsor,
       config: payload.accounts.config,
       magicProgram: payload.accounts.magicProgram,
       magicContext: payload.accounts.magicContext,

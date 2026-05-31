@@ -69,6 +69,7 @@ const main = async () => {
             agent: ctx.agentPda,
             action: actionPda,
             config: ctx.configPda,
+            vaultSponsor: ctx.vaultSponsorPda,
             magicFeeVault: ctx.magicFeeVault,
         },
         params: { rawScore, reasoningHash },

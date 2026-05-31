@@ -152,6 +152,8 @@ export interface Ctx {
     program: anchor.Program<Contract>;
     configPda: PublicKey;
     agentPda: PublicKey;
+    /** Admin-owned, ER-delegated PDA that pays every commit's MagicBlock fees. */
+    vaultSponsorPda: PublicKey;
     magicFeeVault: PublicKey;
 }
 
@@ -172,6 +174,10 @@ export const buildCtx = (): Ctx => {
         seeds.agent(keys.agentWallet.publicKey),
         program.programId,
     );
+    const [vaultSponsorPda] = PublicKey.findProgramAddressSync(
+        seeds.vaultSponsor(),
+        program.programId,
+    );
 
     return {
         env,
@@ -181,6 +187,7 @@ export const buildCtx = (): Ctx => {
         program,
         configPda,
         agentPda,
+        vaultSponsorPda,
         magicFeeVault: magicFeeVaultPdaFromValidator(env.validator),
     };
 };
@@ -201,6 +208,7 @@ export const printHeader = (ctx: Ctx, title: string): void => {
     console.log(`  Agent wallet     : ${ctx.keys.agentWallet.publicKey.toBase58()}`);
     console.log(`  Config PDA       : ${ctx.configPda.toBase58()}`);
     console.log(`  Agent PDA        : ${ctx.agentPda.toBase58()}`);
+    console.log(`  Vault Sponsor PDA: ${ctx.vaultSponsorPda.toBase58()}`);
 };
 
 /**

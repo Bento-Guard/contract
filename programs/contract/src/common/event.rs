@@ -11,6 +11,12 @@ pub struct UpdateConfig {
 }
 
 #[event]
+pub struct InitVaultSponsor {
+  pub vault_sponsor: Pubkey,
+  pub operator: Pubkey,
+}
+
+#[event]
 pub struct RegisterAgent {
   pub agent_wallet: Pubkey,
   pub owner: Pubkey,
